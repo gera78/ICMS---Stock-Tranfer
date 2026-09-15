@@ -56,6 +56,7 @@ SELECTION-SCREEN BEGIN OF BLOCK b3b WITH FRAME TITLE TEXT-b3b.
 PARAMETERS:
   p_vca TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Candidate
   p_vap TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Approved
+  p_vpf TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Post Failed
   p_vpg TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Posting
   p_vpo TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Posted
   p_vcd TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Cancel Detected

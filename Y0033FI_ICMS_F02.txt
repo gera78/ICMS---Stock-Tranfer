@@ -30,7 +30,8 @@ FORM post_released_items.
 
   SELECT * FROM y0033fi_icm_item
     INTO TABLE @DATA(lt_approved)
-    WHERE status = @gc_status-approved.
+    WHERE status = @gc_status-approved
+       OR status = @gc_status-post_failed.
 
   IF lt_approved IS INITIAL.
     MESSAGE e007(y0033icms).
@@ -278,18 +279,22 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
 
   IF ls_err IS NOT INITIAL.
     PERFORM smart_case CHANGING ls_err-message.
-    " Posting failed - release the chunk back to APR with the primary
+    " Posting failed - release the chunk to POST_FAILED (not back to
+    " APPROVED - that would look identical to "never attempted"; see
+    " design discussion on GC_STATUS-POST_FAILED) with the primary
     " error message shown on the item, so it can be corrected and
-    " retried. Exactly ONE log row per item records the real status
-    " transition (POSTING -> APPROVED); every OTHER message the BAPI
-    " returned is logged as BAPI_DETAIL below, with STATUS_FROM =
+    " retried - POST_RELEASED_ITEMS picks up POST_FAILED items the
+    " same as APPROVED ones, whether run interactively or in
+    " background. Exactly ONE log row per item records the real status
+    " transition (POSTING -> POST_FAILED); every OTHER message the
+    " BAPI returned is logged as BAPI_DETAIL below, with STATUS_FROM =
     " STATUS_TO, since it's supplementary detail about the SAME
     " failure, not a separate transition.
     LOOP AT pu_chunk INTO ls_it.
-      UPDATE y0033fi_icm_item SET status = @gc_status-approved,
+      UPDATE y0033fi_icm_item SET status = @gc_status-post_failed,
                                   msg    = @ls_err-message
         WHERE docnum = @ls_it-docnum AND itmnum = @ls_it-itmnum AND seqnr = @ls_it-seqnr.
-      PERFORM write_log USING ls_it gc_action-error gc_status-posting gc_status-approved
+      PERFORM write_log USING ls_it gc_action-error gc_status-posting gc_status-post_failed
                                ls_err-message.
       PERFORM dequeue_item USING ls_it-docnum ls_it-itmnum ls_it-seqnr.
     ENDLOOP.
@@ -304,7 +309,7 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       DATA(lv_ret_msg) = ls_ret_msg-message.
       PERFORM smart_case CHANGING lv_ret_msg.
       LOOP AT pu_chunk INTO ls_it.
-        PERFORM write_log USING ls_it gc_action-bapi_detail gc_status-approved gc_status-approved
+        PERFORM write_log USING ls_it gc_action-bapi_detail gc_status-post_failed gc_status-post_failed
                                  lv_ret_msg.
       ENDLOOP.
     ENDLOOP.

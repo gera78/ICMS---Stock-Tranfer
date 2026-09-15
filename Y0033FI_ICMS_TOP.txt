@@ -68,6 +68,7 @@ CONSTANTS:
   BEGIN OF gc_status,
     candidate          TYPE y0033fi_icm_status_n VALUE '010',
     approved           TYPE y0033fi_icm_status_n VALUE '020',
+    post_failed        TYPE y0033fi_icm_status_n VALUE '025', " approved, POST_ONE_DOCUMENT attempted and failed (any reason - see MSG) - treated as a retry candidate, same as APPROVED, by POST_RELEASED_ITEMS
     posting            TYPE y0033fi_icm_status_n VALUE '030',
     posted             TYPE y0033fi_icm_status_n VALUE '040',
     cancel_detected    TYPE y0033fi_icm_status_n VALUE '050',

@@ -75,7 +75,7 @@ START-OF-SELECTION.
     " User-style view (P_MVIEW) or admin review (P_MADM) - both start
     " from the same persisted data, just shown on different screens.
     PERFORM refresh_from_db USING p_bukrs.
-    PERFORM get_status_filter_view USING p_vca p_vap p_vpg p_vpo p_vcd p_vrr p_vrv p_ver
+    PERFORM get_status_filter_view USING p_vca p_vap p_vpf p_vpg p_vpo p_vcd p_vrr p_vrv p_ver
                                  CHANGING gr_status_filt.
     PERFORM apply_status_filter USING gr_status_filt.
   ENDIF.

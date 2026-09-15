@@ -86,6 +86,7 @@ ENDFORM.
 *---------------------------------------------------------------------*
 FORM get_status_filter_view USING pu_vca TYPE char1
                                    pu_vap TYPE char1
+                                   pu_vpf TYPE char1
                                    pu_vpg TYPE char1
                                    pu_vpo TYPE char1
                                    pu_vcd TYPE char1
@@ -99,6 +100,9 @@ FORM get_status_filter_view USING pu_vca TYPE char1
   ENDIF.
   IF pu_vap = abap_true.
     APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-approved ) TO pc_range.
+  ENDIF.
+  IF pu_vpf = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-post_failed ) TO pc_range.
   ENDIF.
   IF pu_vpg = abap_true.
     APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-posting ) TO pc_range.
@@ -820,6 +824,8 @@ FORM build_status_icons.
         gwa_item-status_icon = icon_led_yellow.          " waiting for user approval
       WHEN gc_status-approved.
         gwa_item-status_icon = icon_incomplete.          " waiting for admin to post
+      WHEN gc_status-post_failed.
+        gwa_item-status_icon = icon_message_warning.     " attempted, failed - see MSG; retry candidate, same as APPROVED
       WHEN gc_status-posting.
         gwa_item-status_icon = icon_locked.              " transient posting lock
       WHEN gc_status-posted.
@@ -859,6 +865,7 @@ FORM build_status_descr.
     CASE gwa_item-status.
       WHEN gc_status-candidate.          gwa_item-status_descr = |{ gwa_item-status } - Candidate|.
       WHEN gc_status-approved.           gwa_item-status_descr = |{ gwa_item-status } - Approved|.
+      WHEN gc_status-post_failed.        gwa_item-status_descr = |{ gwa_item-status } - Post Failed|.
       WHEN gc_status-posting.            gwa_item-status_descr = |{ gwa_item-status } - Posting|.
       WHEN gc_status-posted.             gwa_item-status_descr = |{ gwa_item-status } - Posted|.
       WHEN gc_status-cancel_detected.    gwa_item-status_descr = |{ gwa_item-status } - Cancel Detected|.
