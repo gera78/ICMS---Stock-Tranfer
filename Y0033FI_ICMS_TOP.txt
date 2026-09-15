@@ -118,6 +118,10 @@ CONSTANTS:
 * and, if ever needed, directly in a WHERE against the DB.
 TYPES ty_r_status TYPE RANGE OF y0033fi_icm_status_n.
 
+* Used by FORM PAD_NFENUM_RANGE (Y0033FI_ICMS_F01) to zero-pad S_NFENUM
+* before filtering, in both search and view mode.
+TYPES ty_r_nfenum TYPE RANGE OF j_1bnfdoc-nfenum.
+
 *&---------------------------------------------------------------------*
 *& Types
 *&---------------------------------------------------------------------*

@@ -176,6 +176,30 @@ FORM match_lane USING pu_key TYPE ty_lane_key
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  PAD_NFENUM_RANGE
+*&---------------------------------------------------------------------*
+* S_NFENUM accepts values typed without leading zeros (e.g. "273398"
+* instead of "000273398") - pads LOW/HIGH to the field's real,
+* zero-padded format via the ALPHA conversion exit, so a bare entry
+* still matches. Used by both SELECT_CANDIDATE_DOCUMENTS (search) and
+* REFRESH_FROM_DB (view) before filtering by NFENUM.
+*---------------------------------------------------------------------*
+FORM pad_nfenum_range CHANGING pc_range TYPE ty_r_nfenum.
+  LOOP AT pc_range ASSIGNING FIELD-SYMBOL(<ls_nfenum>).
+    IF <ls_nfenum>-low IS NOT INITIAL.
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING input  = <ls_nfenum>-low
+        IMPORTING output = <ls_nfenum>-low.
+    ENDIF.
+    IF <ls_nfenum>-high IS NOT INITIAL.
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING input  = <ls_nfenum>-high
+        IMPORTING output = <ls_nfenum>-high.
+    ENDIF.
+  ENDLOOP.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  SELECT_CANDIDATE_DOCUMENTS
 *&---------------------------------------------------------------------*
 * Selects candidates from EDOCUMENT (EDOC_TYPE = BR_IN_ST, PROC_STATUS
@@ -191,6 +215,9 @@ ENDFORM.
 * and do NOT become a candidate.
 *---------------------------------------------------------------------*
 FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
+
+  DATA(lt_nfenum) = s_nfenum[].
+  PERFORM pad_nfenum_range CHANGING lt_nfenum.
 
   SELECT edoc_guid, proc_status, process, create_date
     FROM edocument
@@ -211,7 +238,8 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     FROM edobrincoming
     INTO TABLE @DATA(lt_inc)
     FOR ALL ENTRIES IN @lt_edoc
-    WHERE edoc_guid = @lt_edoc-edoc_guid.
+    WHERE edoc_guid = @lt_edoc-edoc_guid
+      AND accesskey IN @s_acckey.
 
   LOOP AT lt_edoc INTO DATA(ls_edoc).
 
@@ -232,7 +260,10 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
       WHERE nfenum = @ls_inc-nfenum
         AND series = @ls_inc-series
         AND bukrs  = @pu_bukrs
-        AND direct = '1'.
+        AND direct = '1'
+        AND docnum IN @s_docnum
+        AND series IN @s_series
+        AND docdat IN @s_docdat.
 
     DATA lv_match_count TYPE n LENGTH 1.
     lv_match_count = COND #( WHEN lines( lt_candidates ) > 9 THEN 9 ELSE lines( lt_candidates ) ).
@@ -252,7 +283,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     " successfully linked, not only the ones that became candidates.
     PERFORM upsert_edoc_active USING ls_edoc-edoc_guid ls_nfdoc-docnum ls_inc ls_edoc-process ls_edoc-proc_status.
 
-    CHECK ls_nfdoc-nfenum IN s_nfenum. " S_NFENUM filter (screen selection) - applies only to what becomes visible, not to tracking above
+    CHECK ls_nfdoc-nfenum IN lt_nfenum. " S_NFENUM filter (screen selection, zero-padded above) - applies only to what becomes visible, not to tracking above
 
     " Eligibility + origin/destination via Y0033FI_ICM_LANE (Q1 resolved)
     DATA(ls_lane_key) = VALUE ty_lane_key(
@@ -1373,12 +1404,18 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
 
   DATA lt_db TYPE STANDARD TABLE OF y0033fi_icm_item WITH DEFAULT KEY.
 
+  DATA(lt_nfenum) = s_nfenum[].
+  PERFORM pad_nfenum_range CHANGING lt_nfenum.
+
   SELECT * FROM y0033fi_icm_item
     INTO TABLE @lt_db
-    WHERE bukrs    = @pu_bukrs
-      AND docdat   IN @s_datum
-      AND nfenum   IN @s_nfenum
-      AND budat_fi IN @s_lcto.
+    WHERE bukrs      = @pu_bukrs
+      AND docdat     IN @s_datum
+      AND nfenum     IN @lt_nfenum
+      AND docnum     IN @s_docnum
+      AND series     IN @s_series
+      AND accesskey  IN @s_acckey
+      AND budat_fi   IN @s_lcto.
 
   CLEAR git_item.
   LOOP AT lt_db INTO DATA(ls_db).

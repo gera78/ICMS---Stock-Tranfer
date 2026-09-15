@@ -20,8 +20,12 @@ SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
 PARAMETERS:
   p_bukrs TYPE bukrs.
 SELECT-OPTIONS:
-  s_datum  FOR sy-datum,
-  s_nfenum FOR j_1bnfdoc-nfenum,
+  s_datum  FOR sy-datum,                        " eDocument creation date
+  s_nfenum FOR j_1bnfdoc-nfenum,                " NFe number - zero-padded automatically, see SELECT_CANDIDATE_DOCUMENTS
+  s_docnum FOR j_1bnfdoc-docnum,                " internal nota fiscal document number
+  s_series FOR j_1bnfdoc-series,                " NFe series
+  s_docdat FOR j_1bnfdoc-docdat MODIF ID fs,    " nota fiscal creation date - search mode only (view mode already filters this via S_DATUM, see REFRESH_FROM_DB)
+  s_acckey FOR edobrincoming-accesskey,         " NF-e access key (44 digits)
 * S_LCTO only applies in view/admin-review mode - nothing is posted
 * yet in search mode, so it is hidden there.
   s_lcto   FOR sy-datum MODIF ID fv.
