@@ -823,7 +823,7 @@ FORM build_status_icons.
       WHEN gc_status-candidate.
         gwa_item-status_icon = icon_led_yellow.          " waiting for user approval
       WHEN gc_status-approved.
-        gwa_item-status_icon = icon_incomplete.          " waiting for admin to post
+        gwa_item-status_icon = icon_checked.              " waiting for admin to post
       WHEN gc_status-post_failed.
         gwa_item-status_icon = icon_message_warning.     " attempted, failed - see MSG; retry candidate, same as APPROVED
       WHEN gc_status-posting.
