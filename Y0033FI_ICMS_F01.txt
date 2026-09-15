@@ -1085,7 +1085,7 @@ FORM save_candidates USING pu_id_exec TYPE char20.
 
     INSERT y0033fi_icm_item FROM @( CORRESPONDING y0033fi_icm_item( ls_sel ) ).
     IF sy-subrc = 0.
-      PERFORM write_log USING ls_sel gc_action-candidate_saved space gc_status-candidate
+      PERFORM write_log USING ls_sel gc_action-candidate_saved '000' gc_status-candidate
                                'Candidate saved by user'.
       " link this SEQNR to the eDoc tracking row, if we have a GUID
       IF ls_sel-edoc_guid IS NOT INITIAL.
@@ -1141,7 +1141,7 @@ FORM delete_candidates.
     DELETE FROM y0033fi_icm_item
       WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr.
     IF sy-subrc = 0.
-      PERFORM write_log USING ls_sel gc_action-candidate_deleted gc_status-candidate space
+      PERFORM write_log USING ls_sel gc_action-candidate_deleted gc_status-candidate '000'
                                'Candidate deleted by user'.
       IF ls_sel-edoc_guid IS NOT INITIAL.
         UPDATE y0033fi_icm_edoc SET seqnr = 0
