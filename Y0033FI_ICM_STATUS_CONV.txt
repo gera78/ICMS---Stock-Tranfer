@@ -87,19 +87,20 @@ FORM convert_item.
          END OF ty_item_upd.
   DATA: lt_item   TYPE STANDARD TABLE OF ty_item_upd,
         lt_upd    TYPE STANDARD TABLE OF ty_item_upd,
-        lv_errors TYPE i.
+        lv_errors TYPE i,
+        lv_found  TYPE abap_bool.
 
-  SELECT docnum itmnum seqnr status status_num
+  SELECT docnum, itmnum, seqnr, status, status_num
     FROM y0033fi_icm_item
-    INTO CORRESPONDING FIELDS OF TABLE @lt_item
     WHERE status_num = @space
-      AND ( bukrs = @p_bukrs OR @p_bukrs IS INITIAL ).
+      AND ( bukrs = @p_bukrs OR @p_bukrs IS INITIAL )
+    INTO CORRESPONDING FIELDS OF TABLE @lt_item.
 
   WRITE: / |Y0033FI_ICM_ITEM: { lines( lt_item ) } row(s) pending conversion|.
 
   LOOP AT lt_item INTO DATA(ls_item).
     PERFORM map_status USING ls_item-status
-                     CHANGING ls_item-status_num DATA(lv_found).
+                     CHANGING ls_item-status_num lv_found.
     IF lv_found = abap_true.
       APPEND ls_item TO lt_upd.
       WRITE: / |  OK     { ls_item-docnum } / { ls_item-itmnum } / { ls_item-seqnr }: |
@@ -144,27 +145,30 @@ FORM convert_log.
            status_from_num TYPE y0033fi_icm_status_n,
            status_to_num   TYPE y0033fi_icm_status_n,
          END OF ty_log_upd.
-  DATA: lt_log    TYPE STANDARD TABLE OF ty_log_upd,
-        lt_upd    TYPE STANDARD TABLE OF ty_log_upd,
-        lv_errors TYPE i.
+  DATA: lt_log        TYPE STANDARD TABLE OF ty_log_upd,
+        lt_upd        TYPE STANDARD TABLE OF ty_log_upd,
+        lv_errors     TYPE i,
+        lv_ok         TYPE abap_bool,
+        lv_found_from TYPE abap_bool,
+        lv_found_to   TYPE abap_bool.
 
-  SELECT docnum itmnum seqnr lognr status_from status_to status_from_num status_to_num
+  SELECT docnum, itmnum, seqnr, lognr, status_from, status_to, status_from_num, status_to_num
     FROM y0033fi_icm_log
-    INTO CORRESPONDING FIELDS OF TABLE @lt_log
     WHERE status_from_num = @space
-       OR status_to_num   = @space.
+       OR status_to_num   = @space
+    INTO CORRESPONDING FIELDS OF TABLE @lt_log.
 
   WRITE: / |Y0033FI_ICM_LOG: { lines( lt_log ) } row(s) pending conversion|.
 
   LOOP AT lt_log INTO DATA(ls_log).
-    DATA(lv_ok) = abap_true.
+    lv_ok = abap_true.
 
 * STATUS_FROM is legitimately blank on actions with no prior status
 * (e.g. CANDIDATE_SAVED) - leave STATUS_FROM_NUM blank too, don't
 * treat that as an unmapped value.
     IF ls_log-status_from_num IS INITIAL AND ls_log-status_from IS NOT INITIAL.
       PERFORM map_status USING ls_log-status_from
-                       CHANGING ls_log-status_from_num DATA(lv_found_from).
+                       CHANGING ls_log-status_from_num lv_found_from.
       IF lv_found_from = abap_false.
         lv_ok = abap_false.
       ENDIF.
@@ -172,7 +176,7 @@ FORM convert_log.
 
     IF ls_log-status_to_num IS INITIAL AND ls_log-status_to IS NOT INITIAL.
       PERFORM map_status USING ls_log-status_to
-                       CHANGING ls_log-status_to_num DATA(lv_found_to).
+                       CHANGING ls_log-status_to_num lv_found_to.
       IF lv_found_to = abap_false.
         lv_ok = abap_false.
       ENDIF.
