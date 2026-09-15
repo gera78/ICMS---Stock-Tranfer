@@ -2,14 +2,14 @@
 *& Report  Y0033FI_ICM_STATUS_CONV
 *&---------------------------------------------------------------------*
 *& CR 16002 - One-time conversion: populates the new numeric
-*& STATUS_NUM field (domain Y0033FI_ICM_STATUS) on Y0033FI_ICM_ITEM,
+*& STATUS_NUM field (domain Y0033FI_ICM_STATUS_N) on Y0033FI_ICM_ITEM,
 *& and STATUS_FROM_NUM/STATUS_TO_NUM on Y0033FI_ICM_LOG, from the
 *& existing text STATUS values - mapping is GC_STATUS -> GC_STATUS_NUM
 *& (Y0033FI_ICMS_TOP), so it can never drift from the constants used
 *& everywhere else.
 *&
 *& Prerequisites (must exist before this program can activate/run):
-*&   - Domain/data element Y0033FI_ICM_STATUS (SE11)
+*&   - Domain/data element Y0033FI_ICM_STATUS_N (SE11)
 *&   - Field STATUS_NUM on Y0033FI_ICM_ITEM
 *&   - Fields STATUS_FROM_NUM / STATUS_TO_NUM on Y0033FI_ICM_LOG
 *&
@@ -37,7 +37,7 @@ SELECTION-SCREEN END OF BLOCK b1.
 TYPES:
   BEGIN OF ty_map,
     status_txt TYPE char20,
-    status_num TYPE y0033fi_icm_status,
+    status_num TYPE y0033fi_icm_status_n,
   END OF ty_map.
 
 DATA: git_map   TYPE STANDARD TABLE OF ty_map,
@@ -64,7 +64,7 @@ ENDFORM.
 *&      Form  MAP_STATUS
 *&---------------------------------------------------------------------*
 FORM map_status USING    pu_status_txt  TYPE char20
-                 CHANGING pc_status_num TYPE y0033fi_icm_status
+                 CHANGING pc_status_num TYPE y0033fi_icm_status_n
                           pc_found      TYPE abap_bool.
   pc_found = abap_false.
   READ TABLE git_map INTO DATA(ls_map) WITH KEY status_txt = pu_status_txt.
@@ -83,7 +83,7 @@ FORM convert_item.
            itmnum     TYPE j_1bnflin-itmnum,
            seqnr      TYPE y0033fi_icm_seq,
            status     TYPE char20,
-           status_num TYPE y0033fi_icm_status,
+           status_num TYPE y0033fi_icm_status_n,
          END OF ty_item_upd.
   DATA: lt_item   TYPE STANDARD TABLE OF ty_item_upd,
         lt_upd    TYPE STANDARD TABLE OF ty_item_upd,
@@ -141,8 +141,8 @@ FORM convert_log.
            lognr           TYPE n LENGTH 6,
            status_from     TYPE char20,
            status_to       TYPE char20,
-           status_from_num TYPE y0033fi_icm_status,
-           status_to_num   TYPE y0033fi_icm_status,
+           status_from_num TYPE y0033fi_icm_status_n,
+           status_to_num   TYPE y0033fi_icm_status_n,
          END OF ty_log_upd.
   DATA: lt_log    TYPE STANDARD TABLE OF ty_log_upd,
         lt_upd    TYPE STANDARD TABLE OF ty_log_upd,
