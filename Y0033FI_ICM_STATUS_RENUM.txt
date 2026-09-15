@@ -1,0 +1,148 @@
+*&---------------------------------------------------------------------*
+*& Report  Y0033FI_ICM_STATUS_RENUM
+*&---------------------------------------------------------------------*
+*& CR 16002 - One-time correction: Y0033FI_ICM_STATUS_CONV originally
+*& mapped CANDIDATE to 000, which collides with the technical initial
+*& value of a NUMC(3) field (SE16N hides it, IS INITIAL wrongly
+*& matches it). GC_STATUS_NUM (Y0033FI_ICMS_TOP) has since been
+*& renumbered - the whole persisted-lifecycle block shifted +10, so
+*& 000 stays free to mean "not set". This program applies the same
+*& shift to data already written under the old numbering:
+*&
+*&   000 -> 010  CANDIDATE            040 -> 050  CANCEL_DETECTED
+*&   010 -> 020  APPROVED             050 -> 060  REVERSAL_REQUESTED
+*&   020 -> 030  POSTING              060 -> 070  REVERSED
+*&   030 -> 040  POSTED
+*&
+*& 900/910/990 (READY_TO_SAVE/NOT_CANDIDATE/ERROR) are unchanged and
+*& not touched here.
+*&
+*& Safety:
+*&   - Runs in TEST mode by default (P_TEST = 'X') - only counts what
+*&     would change, no DB update.
+*&   - Each field (Y0033FI_ICM_ITEM-STATUS_NUM, Y0033FI_ICM_LOG-
+*&     STATUS_FROM_NUM, Y0033FI_ICM_LOG-STATUS_TO_NUM) is shifted with
+*&     one UPDATE per old value, processed HIGHEST OLD VALUE FIRST
+*&     (060 down to 000). This order is what makes a plain "shift by
+*&     +10 in place" safe: by the time a step updates rows FROM some
+*&     old value, no earlier step in this run could have produced that
+*&     same value as a NEW one for it to accidentally re-match (every
+*&     earlier step's target was strictly higher than every later
+*&     step's filter). Do NOT reorder these blocks or run them
+*&     individually out of order.
+*&   - Safe to rerun: once shifted, rows no longer match any old value
+*&     and are left alone.
+*&---------------------------------------------------------------------*
+REPORT y0033fi_icm_status_renum MESSAGE-ID y0033icms.
+
+INCLUDE y0033fi_icms_top.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
+PARAMETERS:
+  p_test TYPE char1 AS CHECKBOX DEFAULT 'X'.  " dry run (no DB update)
+SELECTION-SCREEN END OF BLOCK b1.
+
+TYPES:
+  BEGIN OF ty_shift,
+    old_val TYPE y0033fi_icm_status_n,
+    new_val TYPE y0033fi_icm_status_n,
+  END OF ty_shift.
+
+* Highest OLD value first - see safety note above.
+DATA gt_shift TYPE STANDARD TABLE OF ty_shift.
+
+FORM build_shift_list.
+  gt_shift = VALUE #(
+    ( old_val = '060' new_val = '070' )
+    ( old_val = '050' new_val = '060' )
+    ( old_val = '040' new_val = '050' )
+    ( old_val = '030' new_val = '040' )
+    ( old_val = '020' new_val = '030' )
+    ( old_val = '010' new_val = '020' )
+    ( old_val = '000' new_val = '010' ) ).
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  RENUM_ITEM_STATUS
+*&---------------------------------------------------------------------*
+FORM renum_item_status.
+  DATA lv_total TYPE i.
+
+  LOOP AT gt_shift INTO DATA(ls_shift).
+    SELECT COUNT(*) FROM y0033fi_icm_item
+      INTO @DATA(lv_count)
+      WHERE status_num = @ls_shift-old_val.
+
+    WRITE: / |Y0033FI_ICM_ITEM STATUS_NUM { ls_shift-old_val } -> { ls_shift-new_val }: { lv_count } row(s)|.
+    lv_total = lv_total + lv_count.
+
+    IF p_test = abap_false AND lv_count > 0.
+      UPDATE y0033fi_icm_item SET status_num = @ls_shift-new_val
+        WHERE status_num = @ls_shift-old_val.
+    ENDIF.
+  ENDLOOP.
+
+  IF p_test = abap_true.
+    WRITE: / |Y0033FI_ICM_ITEM: { lv_total } row(s) would be updated (test mode).|.
+  ELSE.
+    COMMIT WORK AND WAIT.
+    WRITE: / |Y0033FI_ICM_ITEM: { lv_total } row(s) updated.|.
+  ENDIF.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  RENUM_LOG_STATUS
+*&---------------------------------------------------------------------*
+FORM renum_log_status.
+  DATA lv_total_from TYPE i.
+  DATA lv_total_to   TYPE i.
+
+  LOOP AT gt_shift INTO DATA(ls_shift).
+    SELECT COUNT(*) FROM y0033fi_icm_log
+      INTO @DATA(lv_count_from)
+      WHERE status_from_num = @ls_shift-old_val.
+    WRITE: / |Y0033FI_ICM_LOG STATUS_FROM_NUM { ls_shift-old_val } -> { ls_shift-new_val }: { lv_count_from } row(s)|.
+    lv_total_from = lv_total_from + lv_count_from.
+
+    IF p_test = abap_false AND lv_count_from > 0.
+      UPDATE y0033fi_icm_log SET status_from_num = @ls_shift-new_val
+        WHERE status_from_num = @ls_shift-old_val.
+    ENDIF.
+
+    SELECT COUNT(*) FROM y0033fi_icm_log
+      INTO @DATA(lv_count_to)
+      WHERE status_to_num = @ls_shift-old_val.
+    WRITE: / |Y0033FI_ICM_LOG STATUS_TO_NUM   { ls_shift-old_val } -> { ls_shift-new_val }: { lv_count_to } row(s)|.
+    lv_total_to = lv_total_to + lv_count_to.
+
+    IF p_test = abap_false AND lv_count_to > 0.
+      UPDATE y0033fi_icm_log SET status_to_num = @ls_shift-new_val
+        WHERE status_to_num = @ls_shift-old_val.
+    ENDIF.
+  ENDLOOP.
+
+  IF p_test = abap_true.
+    WRITE: / |Y0033FI_ICM_LOG: { lv_total_from } FROM row(s) and { lv_total_to } TO row(s) would be updated (test mode).|.
+  ELSE.
+    COMMIT WORK AND WAIT.
+    WRITE: / |Y0033FI_ICM_LOG: { lv_total_from } FROM row(s) and { lv_total_to } TO row(s) updated.|.
+  ENDIF.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& Main processing
+*&---------------------------------------------------------------------*
+START-OF-SELECTION.
+  PERFORM build_shift_list.
+
+  IF p_test = abap_true.
+    WRITE: / 'TEST MODE - no data will be changed.', /.
+  ELSE.
+    WRITE: / 'UPDATE MODE - changes will be committed.', /.
+  ENDIF.
+
+  PERFORM renum_item_status.
+  WRITE: /.
+  PERFORM renum_log_status.
+  WRITE: /.
+  WRITE: / 'Done.'.

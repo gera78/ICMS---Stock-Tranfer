@@ -81,15 +81,21 @@ CONSTANTS:
 * status later without renumbering; 900+ is reserved for statuses
 * that are never persisted, and 990 for ERROR (can occur at any point
 * in the flow, not a step in it).
+* 000 is deliberately UNUSED here - it's the technical initial value
+* of a NUMC(3) field, so a real status coded as 000 is indistinguishable
+* from "never set" (SE16N hides it, IS INITIAL wrongly matches it).
+* 000 is reserved to mean "not set/not yet migrated" - see
+* Y0033FI_ICM_STATUS_RENUM, which corrected data saved under the old
+* 1:1 numbering (CANDIDATE = 000) before this was caught.
 CONSTANTS:
   BEGIN OF gc_status_num,
-    candidate          TYPE y0033fi_icm_status_n VALUE '000',
-    approved           TYPE y0033fi_icm_status_n VALUE '010',
-    posting            TYPE y0033fi_icm_status_n VALUE '020',
-    posted             TYPE y0033fi_icm_status_n VALUE '030',
-    cancel_detected    TYPE y0033fi_icm_status_n VALUE '040',
-    reversal_requested TYPE y0033fi_icm_status_n VALUE '050',
-    reversed           TYPE y0033fi_icm_status_n VALUE '060',
+    candidate          TYPE y0033fi_icm_status_n VALUE '010',
+    approved           TYPE y0033fi_icm_status_n VALUE '020',
+    posting            TYPE y0033fi_icm_status_n VALUE '030',
+    posted             TYPE y0033fi_icm_status_n VALUE '040',
+    cancel_detected    TYPE y0033fi_icm_status_n VALUE '050',
+    reversal_requested TYPE y0033fi_icm_status_n VALUE '060',
+    reversed           TYPE y0033fi_icm_status_n VALUE '070',
     ready_to_save      TYPE y0033fi_icm_status_n VALUE '900', " in-memory only, never persisted
     not_candidate      TYPE y0033fi_icm_status_n VALUE '910', " in-memory only, never persisted
     error              TYPE y0033fi_icm_status_n VALUE '990',
