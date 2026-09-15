@@ -55,40 +55,17 @@ CONSTANTS:
 * TODO (Q2-c): confirm whether these should be used as an additional/
 * alternative cancellation signal alongside J_1BNFDOC-CANCEL.
 
-* STATUS domain (see CR16002_DDIC_SPEC.md) - long, self-explanatory
-* values by design (development team is English-speaking).
-CONSTANTS:
-  BEGIN OF gc_status,
-    ready_to_save      TYPE char20 VALUE 'READY_TO_SAVE', " in-memory only, never persisted - see CALCULATE_CREDIT/SAVE_CANDIDATES
-    candidate          TYPE char20 VALUE 'CANDIDATE',
-    approved           TYPE char20 VALUE 'APPROVED',
-    posting            TYPE char20 VALUE 'POSTING',
-    posted             TYPE char20 VALUE 'POSTED',
-    cancel_detected    TYPE char20 VALUE 'CANCEL_DETECTED',
-    reversal_requested TYPE char20 VALUE 'REVERSAL_REQUESTED',
-    reversed           TYPE char20 VALUE 'REVERSED',
-    error              TYPE char20 VALUE 'ERROR',
-    not_candidate      TYPE char20 VALUE 'NOT_CANDIDATE', " in-memory only, never persisted - item found and calculated fine, but has no ICMS value or no credit, so it's not a real candidate
-  END OF gc_status.
-
-* Y0033FI_ICM_STATUS_N domain (SE11) - numeric replacement for GC_STATUS
-* above, introduced for the CR16002 status reorganization. Values
-* mirror GC_STATUS 1:1 during the migration window. GC_STATUS and the
-* STATUS field stay in place until every caller has moved to
-* GC_STATUS_NUM/STATUS_NUM and Y0033FI_ICM_STATUS_CONV has converted
-* all persisted rows - do not remove either side until then.
-* Gaps between values (multiples of 10) leave room to insert a new
-* status later without renumbering; 900+ is reserved for statuses
-* that are never persisted, and 990 for ERROR (can occur at any point
-* in the flow, not a step in it).
+* STATUS domain - domain Y0033FI_ICM_STATUS_N (SE11), NUMC(3). Gaps
+* between values (multiples of 10) leave room to insert a new status
+* later without renumbering; 900+ is reserved for statuses that are
+* never persisted, and 990 for ERROR (can occur at any point in the
+* flow, not a step in it).
 * 000 is deliberately UNUSED here - it's the technical initial value
 * of a NUMC(3) field, so a real status coded as 000 is indistinguishable
 * from "never set" (SE16N hides it, IS INITIAL wrongly matches it).
-* 000 is reserved to mean "not set/not yet migrated" - see
-* Y0033FI_ICM_STATUS_RENUM, which corrected data saved under the old
-* 1:1 numbering (CANDIDATE = 000) before this was caught.
+* 000 is reserved to mean "not set".
 CONSTANTS:
-  BEGIN OF gc_status_num,
+  BEGIN OF gc_status,
     candidate          TYPE y0033fi_icm_status_n VALUE '010',
     approved           TYPE y0033fi_icm_status_n VALUE '020',
     posting            TYPE y0033fi_icm_status_n VALUE '030',
@@ -96,10 +73,10 @@ CONSTANTS:
     cancel_detected    TYPE y0033fi_icm_status_n VALUE '050',
     reversal_requested TYPE y0033fi_icm_status_n VALUE '060',
     reversed           TYPE y0033fi_icm_status_n VALUE '070',
-    ready_to_save      TYPE y0033fi_icm_status_n VALUE '900', " in-memory only, never persisted
-    not_candidate      TYPE y0033fi_icm_status_n VALUE '910', " in-memory only, never persisted
+    ready_to_save      TYPE y0033fi_icm_status_n VALUE '900', " in-memory only, never persisted - see CALCULATE_CREDIT/SAVE_CANDIDATES
+    not_candidate      TYPE y0033fi_icm_status_n VALUE '910', " in-memory only, never persisted - item found and calculated fine, but has no ICMS value or no credit, so it's not a real candidate
     error              TYPE y0033fi_icm_status_n VALUE '990',
-  END OF gc_status_num.
+  END OF gc_status.
 
 * LOG-ACTION domain
 CONSTANTS:
@@ -187,8 +164,10 @@ TYPES:
     kmein        TYPE konp-kmein,
     credit_amount  TYPE j_1bnfstx-taxval,
     waers        TYPE waers,
-    status       TYPE char20,
-    status_num   TYPE y0033fi_icm_status_n, " CR16002 status reorg - filled by Y0033FI_ICM_STATUS_CONV; replaces STATUS once cutover is complete
+    status       TYPE y0033fi_icm_status_n,
+    line_ok      TYPE char1, " pipeline-internal marker only (SELECT_CANDIDATE_DOCUMENTS...CALCULATE_CREDIT) -
+                              " never a real STATUS value, so it can't live in the (now numeric) STATUS field;
+                              " 'X' = ICMS line read fine, still pending the benefit % lookup
     cre_user     TYPE syuname,
     cre_date     TYPE dats,
     cre_time     TYPE tims,
