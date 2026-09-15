@@ -36,32 +36,97 @@ SELECTION-SCREEN END OF BLOCK b2.
 SELECTION-SCREEN BEGIN OF BLOCK b3a WITH FRAME TITLE TEXT-b3a.
 * Status filter for "Search New Candidates" - every status a fresh
 * search can produce, before anything is saved. All checked by
-* default; selection text of each field is the label shown next to
-* its checkbox. Applied in GET_STATUS_FILTER_SEARCH/APPLY_STATUS_FILTER
-* (Y0033FI_ICMS_F01), right after the search pipeline builds GIT_ITEM.
-PARAMETERS:
-  p_sre TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fs,  " Ready to Save
-  p_snc TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fs,  " Not a Candidate
-  p_ser TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fs.  " Error
+* default. Label (icon + "<code> - <description>") is set in code
+* below (INITIALIZATION), not via Selection Texts - same icons/text
+* as BUILD_STATUS_ICONS/BUILD_STATUS_DESCR (Y0033FI_ICMS_F01), so the
+* filter looks consistent with the grid. Applied in
+* GET_STATUS_FILTER_SEARCH/APPLY_STATUS_FILTER (Y0033FI_ICMS_F01),
+* right after the search pipeline builds GIT_ITEM.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_sre TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fs.
+SELECTION-SCREEN COMMENT 4(4) c_sre_ic MODIF ID fs.
+SELECTION-SCREEN COMMENT 9(35) c_sre_tx MODIF ID fs.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_snc TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fs.
+SELECTION-SCREEN COMMENT 4(4) c_snc_ic MODIF ID fs.
+SELECTION-SCREEN COMMENT 9(35) c_snc_tx MODIF ID fs.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_ser TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fs.
+SELECTION-SCREEN COMMENT 4(4) c_ser_ic MODIF ID fs.
+SELECTION-SCREEN COMMENT 9(35) c_ser_tx MODIF ID fs.
+SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN END OF BLOCK b3a.
 
 SELECTION-SCREEN BEGIN OF BLOCK b3b WITH FRAME TITLE TEXT-b3b.
 * Status filter for "View My Candidates" - every status a saved item
-* can be in. All checked by default.
-PARAMETERS:
-  p_vca TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Candidate
-  p_vap TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Approved
-  p_vpf TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Post Failed
-  p_vpg TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Posting
-  p_vpo TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Posted
-  p_vcd TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Cancel Detected
-  p_vrr TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Reversal Requested
-  p_vrv TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Reversed
-  p_ver TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.  " Error
+* can be in. All checked by default. Same icon+label approach as B3A.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_vca TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(4) c_vca_ic MODIF ID fv.
+SELECTION-SCREEN COMMENT 9(35) c_vca_tx MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_vap TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(4) c_vap_ic MODIF ID fv.
+SELECTION-SCREEN COMMENT 9(35) c_vap_tx MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_vpf TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(4) c_vpf_ic MODIF ID fv.
+SELECTION-SCREEN COMMENT 9(35) c_vpf_tx MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_vpg TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(4) c_vpg_ic MODIF ID fv.
+SELECTION-SCREEN COMMENT 9(35) c_vpg_tx MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_vpo TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(4) c_vpo_ic MODIF ID fv.
+SELECTION-SCREEN COMMENT 9(35) c_vpo_tx MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_vcd TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(4) c_vcd_ic MODIF ID fv.
+SELECTION-SCREEN COMMENT 9(35) c_vcd_tx MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_vrr TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(4) c_vrr_ic MODIF ID fv.
+SELECTION-SCREEN COMMENT 9(35) c_vrr_tx MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_vrv TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(4) c_vrv_ic MODIF ID fv.
+SELECTION-SCREEN COMMENT 9(35) c_vrv_tx MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_ver TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(4) c_ver_ic MODIF ID fv.
+SELECTION-SCREEN COMMENT 9(35) c_ver_tx MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN END OF BLOCK b3b.
 
 INITIALIZATION.
   gv_id_exec = sy-uname && sy-datum && sy-uzeit.
+
+* Filter checkbox icons + "<code> - <description>" labels - same
+* icons/codes as BUILD_STATUS_ICONS/BUILD_STATUS_DESCR (Y0033FI_ICMS_F01).
+  c_sre_ic = icon_led_inactive.     c_sre_tx = '900 - Ready to Save'.
+  c_snc_ic = icon_led_inactive.     c_snc_tx = '910 - Not a Candidate'.
+  c_ser_ic = icon_message_error.    c_ser_tx = '990 - Error'.
+
+  c_vca_ic = icon_led_yellow.       c_vca_tx = '010 - Candidate'.
+  c_vap_ic = icon_checked.          c_vap_tx = '020 - Approved'.
+  c_vpf_ic = icon_message_warning.  c_vpf_tx = '025 - Post Failed'.
+  c_vpg_ic = icon_locked.           c_vpg_tx = '030 - Posting'.
+  c_vpo_ic = icon_led_green.        c_vpo_tx = '040 - Posted'.
+  c_vcd_ic = icon_alert.            c_vcd_tx = '050 - Cancel Detected'.
+  c_vrr_ic = icon_history.          c_vrr_tx = '060 - Reversal Requested'.
+  c_vrv_ic = icon_led_red.          c_vrv_tx = '070 - Reversed'.
+  c_ver_ic = icon_message_error.    c_ver_tx = '990 - Error'.
 
 AT SELECTION-SCREEN OUTPUT.
   LOOP AT SCREEN.
