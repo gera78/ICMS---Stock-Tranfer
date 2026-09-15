@@ -1,0 +1,56 @@
+*&---------------------------------------------------------------------*
+*& Include Y0033FI_ICMS_SCR_USR
+*&---------------------------------------------------------------------*
+*& CR 16002 - Selection screen for Y0033FI_ICM_STOCK_TRANSFER (user
+*& cockpit). Kept separate from the main program so the processing
+*& flow (START-OF-SELECTION / screen modules) stays readable on its
+*& own - classic TOP/SCR/F01 include split.
+*&---------------------------------------------------------------------*
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
+PARAMETERS:
+  p_bukrs TYPE bukrs OBLIGATORY.
+* Ship-from/ship-to are no longer fixed screen parameters - eligibility
+* and direction now come entirely from Y0033FI_ICM_LANE (see FORM
+* MATCH_LANE / SELECT_CANDIDATE_DOCUMENTS in Y0033FI_ICMS_F01).
+SELECT-OPTIONS:
+  s_datum  FOR sy-datum,
+  s_nfenum FOR j_1bnfdoc-nfenum,
+* S_LCTO only applies in view mode - nothing is posted yet in search
+* mode, so it is hidden there (same MODIF ID FV as the status filter).
+  s_lcto   FOR sy-datum MODIF ID fv.
+* TODO (Q5/Q8): reference date for selection still pending - uses
+* nota fiscal issue date for now.
+SELECTION-SCREEN END OF BLOCK b1.
+
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-b02.
+* USER-COMMAND on P_MNEW forces an immediate screen refresh on click
+* (without it, AT SELECTION-SCREEN OUTPUT only reruns on the next
+* Enter/round trip, so the filter block below would not hide/show
+* right away).
+PARAMETERS:
+  p_mnew  RADIOBUTTON GROUP mod DEFAULT 'X' USER-COMMAND mod_chg,   " search new candidates
+  p_mview RADIOBUTTON GROUP mod.               " view my candidates
+SELECTION-SCREEN END OF BLOCK b2.
+
+SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE TEXT-b03.
+* Filter (view mode only) - single choice, one radio button per option.
+* Selection text of each field is the label shown next to its button.
+PARAMETERS:
+  p_fall  RADIOBUTTON GROUP filt MODIF ID fv,               " All
+  p_fatt  RADIOBUTTON GROUP filt DEFAULT 'X' MODIF ID fv,    " Needs attention (default)
+  p_fnew  RADIOBUTTON GROUP filt MODIF ID fv,                " New candidates only
+  p_fproc RADIOBUTTON GROUP filt MODIF ID fv,                " Processed (Approved/Posted/Reversed)
+  p_fclean RADIOBUTTON GROUP filt MODIF ID fv.               " Candidates only, no ERROR items
+SELECTION-SCREEN END OF BLOCK b3.
+
+INITIALIZATION.
+  gv_id_exec = sy-uname && sy-datum && sy-uzeit.
+
+AT SELECTION-SCREEN OUTPUT.
+  LOOP AT SCREEN.
+    IF screen-group1 = 'FV' AND p_mnew = 'X'.
+      screen-active = 0.  " hide entirely - filter doesn't apply when searching new candidates
+      MODIFY SCREEN.
+    ENDIF.
+  ENDLOOP.
