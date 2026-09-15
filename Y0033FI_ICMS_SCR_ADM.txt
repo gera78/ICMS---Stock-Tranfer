@@ -12,8 +12,13 @@
 *&---------------------------------------------------------------------*
 
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
+* Not OBLIGATORY - that flag validates on every PAI round trip, which
+* fires just from clicking a mode radio button (P_MNEW has
+* USER-COMMAND) and gets in the way of navigating the screen before
+* the user is done. Checked manually below instead, only when the
+* user actually presses Execute (SY-UCOMM = 'ONLI').
 PARAMETERS:
-  p_bukrs TYPE bukrs OBLIGATORY.
+  p_bukrs TYPE bukrs.
 SELECT-OPTIONS:
   s_datum  FOR sy-datum,
   s_nfenum FOR j_1bnfdoc-nfenum,
@@ -144,3 +149,12 @@ AT SELECTION-SCREEN OUTPUT.
       MODIFY SCREEN.
     ENDIF.
   ENDLOOP.
+
+AT SELECTION-SCREEN.
+* ONLI = the user pressed Execute (F8), not just clicked a radio
+* button/checkbox - only THEN is P_BUKRS actually required. Background
+* jobs don't go through AT SELECTION-SCREEN interactively, so this
+* only affects foreground execution.
+  IF sy-ucomm = 'ONLI' AND p_bukrs IS INITIAL.
+    MESSAGE 'Enter a Company Code' TYPE 'E'.
+  ENDIF.
