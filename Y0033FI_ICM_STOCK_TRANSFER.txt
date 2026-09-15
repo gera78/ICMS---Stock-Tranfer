@@ -20,6 +20,15 @@ INCLUDE y0033fi_icms_f01.
 *& Main processing
 *&---------------------------------------------------------------------*
 START-OF-SELECTION.
+* Second safety net for P_BUKRS, on top of the AT SELECTION-SCREEN
+* check in Y0033FI_ICMS_SCR_USR (gated on SY-UCOMM = 'ONLI', which a
+* background job never sets) - this one runs unconditionally, so a
+* variant saved with a blank P_BUKRS can't silently run against the
+* fallback/default parameters instead of the real company code's.
+  IF p_bukrs IS INITIAL.
+    MESSAGE 'Enter a Company Code' TYPE 'E'.
+  ENDIF.
+
   PERFORM get_company_currency USING p_bukrs CHANGING gv_waers.
   PERFORM get_params USING p_bukrs.
 
