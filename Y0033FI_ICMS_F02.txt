@@ -163,9 +163,17 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
 
   READ TABLE pu_chunk INTO DATA(ls_any) INDEX 1.
 
+* If any item in this chunk is already POST_FAILED, this is a retry -
+* we already know posting with the nota fiscal's own date failed
+* before (see GC_STATUS-POST_FAILED), so there is no point trying
+* that same date again. Go straight to today's date (current period)
+* instead of wasting a cycle on a date we already know will fail.
+* BLDAT (document date) never changes - only BUDAT (posting date), same
+* as the existing period-closed fallback below.
   DATA(lv_bldat) = ls_any-docdat.
-  DATA(lv_budat) = ls_any-docdat.
-  DATA(lv_fallback) = abap_false.
+  DATA(lv_is_retry) = xsdbool( line_exists( pu_chunk[ status = gc_status-post_failed ] ) ).
+  DATA(lv_budat) = COND #( WHEN lv_is_retry = abap_true THEN sy-datum ELSE ls_any-docdat ).
+  DATA(lv_fallback) = lv_is_retry.
 
   DO 2 TIMES.
     CLEAR: ls_header, lt_gl, lt_cur, lt_return, ls_err, lt_buzei.
