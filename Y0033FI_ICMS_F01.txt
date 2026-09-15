@@ -944,6 +944,63 @@ FORM set_all_sel USING pu_value TYPE abap_bool.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  ENSURE_FULL_DOCNUM_SELECTION
+*&---------------------------------------------------------------------*
+* In practice, an action should apply to every item of a nota fiscal
+* (DOCNUM), not just some of them. If the user ticked only part of a
+* DOCNUM's rows, ask once (covering every affected DOCNUM in a single
+* question) whether to select every item of those documents, and do
+* so on "Yes". Answering "No" leaves the selection exactly as the
+* user made it - this is a convenience prompt, not a hard block, so
+* the underlying action (SAVE/APPROVE/DEL_CAND/REQ_REV) still runs
+* against whatever GIT_ITEM-SEL ends up being.
+*---------------------------------------------------------------------*
+FORM ensure_full_docnum_selection.
+
+  DATA lt_docnum TYPE STANDARD TABLE OF j_1bdocnum WITH DEFAULT KEY.
+  LOOP AT git_item INTO DATA(ls_sel) WHERE sel = abap_true.
+    READ TABLE lt_docnum WITH KEY table_line = ls_sel-docnum TRANSPORTING NO FIELDS.
+    IF sy-subrc <> 0.
+      APPEND ls_sel-docnum TO lt_docnum.
+    ENDIF.
+  ENDLOOP.
+  CHECK lt_docnum IS NOT INITIAL.
+
+  " Keep only the DOCNUMs that have at least one UNselected row too -
+  " a DOCNUM already fully selected needs no prompt.
+  DATA lt_incomplete TYPE STANDARD TABLE OF j_1bdocnum WITH DEFAULT KEY.
+  LOOP AT lt_docnum INTO DATA(lv_docnum).
+    READ TABLE git_item TRANSPORTING NO FIELDS
+      WITH KEY docnum = lv_docnum sel = abap_false.
+    IF sy-subrc = 0.
+      APPEND lv_docnum TO lt_incomplete.
+    ENDIF.
+  ENDLOOP.
+  CHECK lt_incomplete IS NOT INITIAL.
+
+  DATA lv_answer TYPE char1.
+  CALL FUNCTION 'POPUP_TO_CONFIRM'
+    EXPORTING
+      titlebar       = 'Partial nota fiscal selection'
+      text_question  = |{ lines( lt_incomplete ) } nota fiscal(s) have some items not selected. Select all items of these documents?|
+      text_button_1  = 'Yes'
+      text_button_2  = 'No'
+      default_button = '1'
+    IMPORTING
+      answer         = lv_answer.
+
+  CHECK lv_answer = '1'.
+
+  LOOP AT git_item ASSIGNING FIELD-SYMBOL(<ls_item>).
+    READ TABLE lt_incomplete WITH KEY table_line = <ls_item>-docnum TRANSPORTING NO FIELDS.
+    IF sy-subrc = 0.
+      <ls_item>-sel = abap_true.
+    ENDIF.
+  ENDLOOP.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  NEXT_SEQNR
 *&---------------------------------------------------------------------*
 FORM next_seqnr USING pu_docnum TYPE j_1bnfdoc-docnum

@@ -33,11 +33,13 @@ MODULE user_command_0100 INPUT.
   CASE gv_ucomm.
     WHEN 'SAVE'.
       IF p_mnew = 'X'.
+        PERFORM ensure_full_docnum_selection.
         PERFORM save_candidates USING gv_id_exec.
         LEAVE TO SCREEN 0. " re-run selection to reflect DB state
       ENDIF.
     WHEN 'DEL_CAND'.
       IF p_mview = 'X'.
+        PERFORM ensure_full_docnum_selection.
         PERFORM delete_candidates.
         PERFORM refresh_from_db USING p_bukrs.
         PERFORM apply_status_filter USING gr_status_filt.
@@ -48,6 +50,7 @@ MODULE user_command_0100 INPUT.
       ENDIF.
     WHEN 'APPROVE'.
       IF p_mview = 'X'.
+        PERFORM ensure_full_docnum_selection.
         PERFORM approve_candidates.
         PERFORM refresh_from_db USING p_bukrs.
         PERFORM apply_status_filter USING gr_status_filt.
@@ -58,6 +61,7 @@ MODULE user_command_0100 INPUT.
       ENDIF.
     WHEN 'REQ_REV'.
       IF p_mview = 'X'.
+        PERFORM ensure_full_docnum_selection.
         PERFORM request_reversal.
         PERFORM refresh_from_db USING p_bukrs.
         PERFORM apply_status_filter USING gr_status_filt.
