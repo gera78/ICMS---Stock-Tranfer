@@ -512,10 +512,12 @@ FORM read_items_and_icms.
       ls_out-prctr  = ls_lin-prctr.
 
       IF lv_lines = 0.
-        ls_out-status = gc_status-error.
+        ls_out-status     = gc_status-error.
+        ls_out-status_num = gc_status_num-error.
         ls_out-msg    = 'No ICMS line found in J_1BNFSTX for this item'.
       ELSEIF lv_lines > 1.
-        ls_out-status = gc_status-error.
+        ls_out-status     = gc_status-error.
+        ls_out-status_num = gc_status_num-error.
         DATA lv_msg_lines TYPE char100.
         lv_msg_lines = |Item has { lv_lines } ICMS lines - selection rule pending (Q6)|.
         ls_out-msg    = lv_msg_lines.
@@ -606,7 +608,8 @@ FORM determine_benefit_percentage.
     ENDIF.
 
     IF lv_found = abap_false.
-      gwa_item-status = gc_status-error.
+      gwa_item-status     = gc_status-error.
+      gwa_item-status_num = gc_status_num-error.
       gwa_item-msg    = 'YRB1 condition not found/not valid for this key (TODO Q11)'.
     ENDIF.
 
@@ -639,7 +642,7 @@ FORM filter_active_cycle.
     SELECT SINGLE @abap_true FROM y0033fi_icm_item INTO @DATA(lv_exists)
       WHERE docnum = @gwa_item-docnum
         AND itmnum = @gwa_item-itmnum
-        AND status <> @gc_status-reversed.
+        AND status_num <> @gc_status_num-reversed.
 
     IF sy-subrc = 0.
       APPEND lv_tabix TO lt_remove_idx.
@@ -665,7 +668,8 @@ FORM calculate_credit.
     DATA(lv_tabix) = sy-tabix.
     gwa_item-credit_amount = gwa_item-icms_base * ( gwa_item-benefit_percent / 100 ).
     gwa_item-waers  = gv_waers.
-    gwa_item-status = gc_status-ready_to_save.  " not yet saved - see design note on GC_STATUS-READY_TO_SAVE
+    gwa_item-status     = gc_status-ready_to_save.  " not yet saved - see design note on GC_STATUS-READY_TO_SAVE
+    gwa_item-status_num = gc_status_num-ready_to_save.
     MODIFY git_item FROM gwa_item INDEX lv_tabix.
   ENDLOOP.
 
@@ -684,11 +688,12 @@ ENDFORM.
 *---------------------------------------------------------------------*
 FORM flag_not_candidates.
 
-  LOOP AT git_item INTO gwa_item WHERE status = gc_status-ready_to_save.
+  LOOP AT git_item INTO gwa_item WHERE status_num = gc_status_num-ready_to_save.
     DATA(lv_tabix) = sy-tabix.
 
     IF gwa_item-icms_val = 0 OR gwa_item-credit_amount = 0.
-      gwa_item-status = gc_status-not_candidate.
+      gwa_item-status     = gc_status-not_candidate.
+      gwa_item-status_num = gc_status_num-not_candidate.
       IF gwa_item-icms_val = 0.
         gwa_item-msg = 'No ICMS value on this nota fiscal line - not a candidate'.
       ELSE.
@@ -774,26 +779,26 @@ FORM build_status_icons.
   LOOP AT git_item INTO gwa_item.
     DATA(lv_tabix) = sy-tabix.
 
-    CASE gwa_item-status.
-      WHEN gc_status-ready_to_save.
+    CASE gwa_item-status_num.
+      WHEN gc_status_num-ready_to_save.
         gwa_item-status_icon = icon_led_inactive.       " not saved yet
-      WHEN gc_status-candidate.
+      WHEN gc_status_num-candidate.
         gwa_item-status_icon = icon_led_yellow.          " waiting for user approval
-      WHEN gc_status-approved.
+      WHEN gc_status_num-approved.
         gwa_item-status_icon = icon_incomplete.          " waiting for admin to post
-      WHEN gc_status-posting.
+      WHEN gc_status_num-posting.
         gwa_item-status_icon = icon_locked.              " transient posting lock
-      WHEN gc_status-posted.
+      WHEN gc_status_num-posted.
         gwa_item-status_icon = icon_led_green.            " done
-      WHEN gc_status-cancel_detected.
+      WHEN gc_status_num-cancel_detected.
         gwa_item-status_icon = icon_alert.               " needs attention
-      WHEN gc_status-reversal_requested.
+      WHEN gc_status_num-reversal_requested.
         gwa_item-status_icon = icon_history.             " waiting for admin to execute reversal
-      WHEN gc_status-reversed.
+      WHEN gc_status_num-reversed.
         gwa_item-status_icon = icon_led_red.              " closed out
-      WHEN gc_status-error.
+      WHEN gc_status_num-error.
         gwa_item-status_icon = icon_message_error.       " blocked
-      WHEN gc_status-not_candidate.
+      WHEN gc_status_num-not_candidate.
         gwa_item-status_icon = icon_led_inactive.        " nothing to offer here, not an error
       WHEN OTHERS.
         CLEAR gwa_item-status_icon.
@@ -919,6 +924,34 @@ FORM smart_case CHANGING pc_text TYPE any.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  STATUS_CHAR_TO_NUM
+*&---------------------------------------------------------------------*
+* Translates a GC_STATUS (char20) value to its GC_STATUS_NUM (NUMC 3)
+* counterpart, for callers that still only carry the char20 value
+* (e.g. WRITE_LOG's existing USING parameters). Blank in, blank out -
+* a blank status_from/status_to is legitimate (see WRITE_LOG callers
+* for CANDIDATE_SAVED/CANDIDATE_DELETED), not an error.
+*---------------------------------------------------------------------*
+FORM status_char_to_num USING    pu_status_txt  TYPE char20
+                         CHANGING pc_status_num TYPE y0033fi_icm_status_n.
+  CLEAR pc_status_num.
+  CHECK pu_status_txt IS NOT INITIAL.
+  CASE pu_status_txt.
+    WHEN gc_status-candidate.          pc_status_num = gc_status_num-candidate.
+    WHEN gc_status-approved.           pc_status_num = gc_status_num-approved.
+    WHEN gc_status-posting.            pc_status_num = gc_status_num-posting.
+    WHEN gc_status-posted.             pc_status_num = gc_status_num-posted.
+    WHEN gc_status-cancel_detected.    pc_status_num = gc_status_num-cancel_detected.
+    WHEN gc_status-reversal_requested. pc_status_num = gc_status_num-reversal_requested.
+    WHEN gc_status-reversed.           pc_status_num = gc_status_num-reversed.
+    WHEN gc_status-ready_to_save.      pc_status_num = gc_status_num-ready_to_save.
+    WHEN gc_status-not_candidate.      pc_status_num = gc_status_num-not_candidate.
+    WHEN gc_status-error.              pc_status_num = gc_status_num-error.
+    WHEN OTHERS.                       CLEAR pc_status_num.
+  ENDCASE.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  WRITE_LOG
 *&---------------------------------------------------------------------*
 FORM write_log USING pu_item        TYPE any
@@ -939,23 +972,33 @@ FORM write_log USING pu_item        TYPE any
   PERFORM next_lognr USING ls_item-docnum ls_item-itmnum ls_item-seqnr
                    CHANGING lv_lognr.
 
+* CR16002 status reorg - STATUS_FROM_NUM/STATUS_TO_NUM are derived
+* here from the char20 params so every caller keeps working unchanged;
+* see STATUS_CHAR_TO_NUM above.
+  DATA lv_status_from_num TYPE y0033fi_icm_status_n.
+  DATA lv_status_to_num   TYPE y0033fi_icm_status_n.
+  PERFORM status_char_to_num USING pu_status_from CHANGING lv_status_from_num.
+  PERFORM status_char_to_num USING pu_status_to   CHANGING lv_status_to_num.
+
   INSERT INTO y0033fi_icm_log VALUES @( VALUE #(
-    docnum      = ls_item-docnum
-    itmnum      = ls_item-itmnum
-    seqnr       = ls_item-seqnr
-    lognr       = lv_lognr
-    bukrs       = ls_item-bukrs
-    action      = pu_action
-    status_from = pu_status_from
-    status_to   = pu_status_to
-    act_user    = sy-uname
-    act_date    = sy-datum
-    act_time    = sy-uzeit
-    belnr       = ls_item-belnr_fi
-    gjahr       = ls_item-gjahr_fi
-    budat       = ls_item-budat_fi
-    bldat       = ls_item-bldat_fi
-    message     = pu_message ) ).
+    docnum          = ls_item-docnum
+    itmnum          = ls_item-itmnum
+    seqnr           = ls_item-seqnr
+    lognr           = lv_lognr
+    bukrs           = ls_item-bukrs
+    action          = pu_action
+    status_from     = pu_status_from
+    status_to       = pu_status_to
+    status_from_num = lv_status_from_num
+    status_to_num   = lv_status_to_num
+    act_user        = sy-uname
+    act_date        = sy-datum
+    act_time        = sy-uzeit
+    belnr           = ls_item-belnr_fi
+    gjahr           = ls_item-gjahr_fi
+    budat           = ls_item-budat_fi
+    bldat           = ls_item-bldat_fi
+    message         = pu_message ) ).
 
 ENDFORM.
 
@@ -1001,7 +1044,7 @@ ENDFORM.
 FORM save_candidates USING pu_id_exec TYPE char20.
 
   DATA lt_selected TYPE ty_it_item.
-  LOOP AT git_item INTO DATA(ls_cand) WHERE sel = 'X' AND status = gc_status-ready_to_save.
+  LOOP AT git_item INTO DATA(ls_cand) WHERE sel = 'X' AND status_num = gc_status_num-ready_to_save.
     APPEND ls_cand TO lt_selected.
   ENDLOOP.
   IF lt_selected IS INITIAL.
@@ -1028,7 +1071,7 @@ FORM save_candidates USING pu_id_exec TYPE char20.
       INTO @DATA(lv_active_count)
       WHERE docnum = @ls_sel-docnum
         AND itmnum = @ls_sel-itmnum
-        AND status <> @gc_status-reversed.
+        AND status_num <> @gc_status_num-reversed.
     IF lv_active_count > 0.
       lv_skip = lv_skip + 1.
       PERFORM dequeue_item USING ls_sel-docnum ls_sel-itmnum 0.
@@ -1037,8 +1080,9 @@ FORM save_candidates USING pu_id_exec TYPE char20.
 
     DATA lv_seqnr TYPE n LENGTH 3.
     PERFORM next_seqnr USING ls_sel-docnum ls_sel-itmnum CHANGING lv_seqnr.
-    ls_sel-seqnr    = lv_seqnr.
-    ls_sel-status   = gc_status-candidate.
+    ls_sel-seqnr      = lv_seqnr.
+    ls_sel-status     = gc_status-candidate.
+    ls_sel-status_num = gc_status_num-candidate.
     ls_sel-cre_user = sy-uname.
     ls_sel-cre_date = sy-datum.
     ls_sel-cre_time = sy-uzeit.
@@ -1082,7 +1126,7 @@ ENDFORM.
 FORM delete_candidates.
 
   DATA lt_selected TYPE ty_it_item.
-  LOOP AT git_item INTO DATA(ls_cand) WHERE sel = 'X' AND status = gc_status-candidate.
+  LOOP AT git_item INTO DATA(ls_cand) WHERE sel = 'X' AND status_num = gc_status_num-candidate.
     APPEND ls_cand TO lt_selected.
   ENDLOOP.
   IF lt_selected IS INITIAL.
@@ -1175,7 +1219,7 @@ ENDFORM.
 FORM approve_candidates.
 
   DATA lt_selected TYPE ty_it_item.
-  LOOP AT git_item INTO DATA(ls_cand) WHERE sel = 'X' AND status = gc_status-candidate.
+  LOOP AT git_item INTO DATA(ls_cand) WHERE sel = 'X' AND status_num = gc_status_num-candidate.
     APPEND ls_cand TO lt_selected.
   ENDLOOP.
   IF lt_selected IS INITIAL.
@@ -1190,7 +1234,8 @@ FORM approve_candidates.
       CONTINUE.
     ENDIF.
 
-    UPDATE y0033fi_icm_item SET status   = @gc_status-approved,
+    UPDATE y0033fi_icm_item SET status     = @gc_status-approved,
+                                status_num = @gc_status_num-approved,
                                 apr_user = @sy-uname,
                                 apr_date = @sy-datum,
                                 apr_time = @sy-uzeit
@@ -1221,8 +1266,8 @@ FORM request_reversal.
 
   DATA lt_selected TYPE ty_it_item.
   LOOP AT git_item INTO DATA(ls_cand) WHERE sel = 'X'
-                                         AND ( status = gc_status-posted
-                                            OR status = gc_status-cancel_detected ).
+                                         AND ( status_num = gc_status_num-posted
+                                            OR status_num = gc_status_num-cancel_detected ).
     APPEND ls_cand TO lt_selected.
   ENDLOOP.
   IF lt_selected IS INITIAL.
@@ -1237,11 +1282,12 @@ FORM request_reversal.
       CONTINUE.
     ENDIF.
 
-    DATA(lv_trigger) = COND char20( WHEN ls_sel-status = gc_status-cancel_detected
+    DATA(lv_trigger) = COND char20( WHEN ls_sel-status_num = gc_status_num-cancel_detected
                                      THEN gc_trigger-nf_canceled
                                      ELSE gc_trigger-manual ).
 
     UPDATE y0033fi_icm_item SET status        = @gc_status-reversal_requested,
+                                status_num        = @gc_status_num-reversal_requested,
                                 reversal_trigger  = @lv_trigger,
                                 reversal_req_user = @sy-uname,
                                 reversal_req_date = @sy-datum,
@@ -1276,7 +1322,7 @@ FORM check_nf_cancellation.
   SELECT docnum, itmnum, seqnr, belnr_fi, gjahr_fi
     FROM y0033fi_icm_item
     INTO TABLE @DATA(lt_posted)
-    WHERE status = @gc_status-posted.
+    WHERE status_num = @gc_status_num-posted.
 
   DATA lv_flagged TYPE i.
 
@@ -1292,6 +1338,7 @@ FORM check_nf_cancellation.
     ENDIF.
 
     UPDATE y0033fi_icm_item SET status         = @gc_status-cancel_detected,
+                                status_num     = @gc_status_num-cancel_detected,
                                 canc_det_date  = @sy-datum,
                                 canc_det_time  = @sy-uzeit,
                                 canc_det_user  = @sy-uname
