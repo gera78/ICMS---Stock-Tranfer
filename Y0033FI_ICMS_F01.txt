@@ -54,31 +54,70 @@ FORM get_params USING pu_bukrs TYPE bukrs.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
-*&      Form  GET_SCREEN_FILTER
+*&      Form  GET_STATUS_FILTER_SEARCH
 *&---------------------------------------------------------------------*
-* Translates the four filter radio buttons (P_FALL/P_FATT/P_FNEW/
-* P_FPROC, declared in Y0033FI_ICMS_SCR_USR / _SCR_ADM) into the
-* single CHAR1 code that FORM APPLY_SCREEN_FILTER already works with.
+* Builds the status range for "Search New Candidates" from the three
+* checkboxes declared in Y0033FI_ICMS_SCR_USR / _SCR_ADM (MODIF ID FS)
+* - one per status a fresh search can possibly produce, before saving.
 *---------------------------------------------------------------------*
-FORM get_screen_filter USING pu_fall  TYPE char1
-                              pu_fatt  TYPE char1
-                              pu_fnew  TYPE char1
-                              pu_fproc TYPE char1
-                              pu_fclean TYPE char1
-                     CHANGING pc_filter TYPE char1.
-
-  IF pu_fall = abap_true.
-    pc_filter = gc_filter-all.
-  ELSEIF pu_fatt = abap_true.
-    pc_filter = gc_filter-attention.
-  ELSEIF pu_fnew = abap_true.
-    pc_filter = gc_filter-new_cand.
-  ELSEIF pu_fproc = abap_true.
-    pc_filter = gc_filter-processed.
-  ELSEIF pu_fclean = abap_true.
-    pc_filter = gc_filter-clean.
+FORM get_status_filter_search USING pu_sre TYPE char1
+                                     pu_snc TYPE char1
+                                     pu_ser TYPE char1
+                            CHANGING pc_range TYPE ty_r_status.
+  CLEAR pc_range.
+  IF pu_sre = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status_num-ready_to_save ) TO pc_range.
   ENDIF.
+  IF pu_snc = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status_num-not_candidate ) TO pc_range.
+  ENDIF.
+  IF pu_ser = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status_num-error ) TO pc_range.
+  ENDIF.
+ENDFORM.
 
+*&---------------------------------------------------------------------*
+*&      Form  GET_STATUS_FILTER_VIEW
+*&---------------------------------------------------------------------*
+* Builds the status range for "View My Candidates" (and the admin
+* review screen) from the eight checkboxes declared in
+* Y0033FI_ICMS_SCR_USR / _SCR_ADM (MODIF ID FV) - one per status a
+* saved/persisted item can be in.
+*---------------------------------------------------------------------*
+FORM get_status_filter_view USING pu_vca TYPE char1
+                                   pu_vap TYPE char1
+                                   pu_vpg TYPE char1
+                                   pu_vpo TYPE char1
+                                   pu_vcd TYPE char1
+                                   pu_vrr TYPE char1
+                                   pu_vrv TYPE char1
+                                   pu_ver TYPE char1
+                          CHANGING pc_range TYPE ty_r_status.
+  CLEAR pc_range.
+  IF pu_vca = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status_num-candidate ) TO pc_range.
+  ENDIF.
+  IF pu_vap = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status_num-approved ) TO pc_range.
+  ENDIF.
+  IF pu_vpg = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status_num-posting ) TO pc_range.
+  ENDIF.
+  IF pu_vpo = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status_num-posted ) TO pc_range.
+  ENDIF.
+  IF pu_vcd = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status_num-cancel_detected ) TO pc_range.
+  ENDIF.
+  IF pu_vrr = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status_num-reversal_requested ) TO pc_range.
+  ENDIF.
+  IF pu_vrv = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status_num-reversed ) TO pc_range.
+  ENDIF.
+  IF pu_ver = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status_num-error ) TO pc_range.
+  ENDIF.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -1411,25 +1450,16 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
-*&      Form  APPLY_SCREEN_FILTER
+*&      Form  APPLY_STATUS_FILTER
 *&---------------------------------------------------------------------*
-FORM apply_screen_filter USING pu_filter TYPE char1.
+* Keeps only the rows whose STATUS_NUM is checked on the filter
+* checkboxes (PU_RANGE, built by GET_STATUS_FILTER_SEARCH/_VIEW).
+* Unchecking every box is not a no-op - it means "show nothing", same
+* as an empty range matching nothing.
+*---------------------------------------------------------------------*
+FORM apply_status_filter USING pu_range TYPE ty_r_status.
 
-  CASE pu_filter.
-    WHEN gc_filter-attention.
-      DELETE git_item WHERE status <> gc_status-cancel_detected
-                         AND status <> gc_status-reversal_requested
-                         AND status <> gc_status-error.
-    WHEN gc_filter-new_cand.
-      DELETE git_item WHERE status <> gc_status-candidate.
-    WHEN gc_filter-processed.
-      DELETE git_item WHERE status <> gc_status-approved
-                         AND status <> gc_status-posted
-                         AND status <> gc_status-reversed.
-    WHEN gc_filter-clean.
-      DELETE git_item WHERE status = gc_status-error.
-    WHEN OTHERS. " gc_filter-all: no filtering
-  ENDCASE.
+  DELETE git_item WHERE status_num NOT IN pu_range.
 
 ENDFORM.
 

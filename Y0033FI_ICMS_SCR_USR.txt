@@ -33,24 +33,43 @@ PARAMETERS:
   p_mview RADIOBUTTON GROUP mod.               " view my candidates
 SELECTION-SCREEN END OF BLOCK b2.
 
-SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE TEXT-b03.
-* Filter (view mode only) - single choice, one radio button per option.
-* Selection text of each field is the label shown next to its button.
+SELECTION-SCREEN BEGIN OF BLOCK b3a WITH FRAME TITLE TEXT-b3a.
+* Status filter for "Search New Candidates" - every status a fresh
+* search can produce, before anything is saved. All checked by
+* default; selection text of each field is the label shown next to
+* its checkbox. Applied in GET_STATUS_FILTER_SEARCH/APPLY_STATUS_FILTER
+* (Y0033FI_ICMS_F01), right after the search pipeline builds GIT_ITEM.
 PARAMETERS:
-  p_fall  RADIOBUTTON GROUP filt MODIF ID fv,               " All
-  p_fatt  RADIOBUTTON GROUP filt DEFAULT 'X' MODIF ID fv,    " Needs attention (default)
-  p_fnew  RADIOBUTTON GROUP filt MODIF ID fv,                " New candidates only
-  p_fproc RADIOBUTTON GROUP filt MODIF ID fv,                " Processed (Approved/Posted/Reversed)
-  p_fclean RADIOBUTTON GROUP filt MODIF ID fv.               " Candidates only, no ERROR items
-SELECTION-SCREEN END OF BLOCK b3.
+  p_sre TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fs,  " Ready to Save
+  p_snc TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fs,  " Not a Candidate
+  p_ser TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fs.  " Error
+SELECTION-SCREEN END OF BLOCK b3a.
+
+SELECTION-SCREEN BEGIN OF BLOCK b3b WITH FRAME TITLE TEXT-b3b.
+* Status filter for "View My Candidates" - every status a saved item
+* can be in. All checked by default.
+PARAMETERS:
+  p_vca TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Candidate
+  p_vap TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Approved
+  p_vpg TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Posting
+  p_vpo TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Posted
+  p_vcd TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Cancel Detected
+  p_vrr TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Reversal Requested
+  p_vrv TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv,  " Reversed
+  p_ver TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.  " Error
+SELECTION-SCREEN END OF BLOCK b3b.
 
 INITIALIZATION.
   gv_id_exec = sy-uname && sy-datum && sy-uzeit.
 
 AT SELECTION-SCREEN OUTPUT.
   LOOP AT SCREEN.
-    IF screen-group1 = 'FV' AND p_mnew = 'X'.
-      screen-active = 0.  " hide entirely - filter doesn't apply when searching new candidates
+    IF screen-group1 = 'FS' AND p_mnew <> 'X'.
+      screen-active = 0.  " hide entirely - only applies when searching new candidates
+      MODIFY SCREEN.
+    ENDIF.
+    IF screen-group1 = 'FV' AND p_mview <> 'X'.
+      screen-active = 0.  " hide entirely - only applies to view mode
       MODIFY SCREEN.
     ENDIF.
   ENDLOOP.

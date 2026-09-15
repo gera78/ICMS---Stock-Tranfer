@@ -61,8 +61,6 @@ START-OF-SELECTION.
     RETURN.
   ENDIF.
 
-  PERFORM get_screen_filter USING p_fall p_fatt p_fnew p_fproc p_fclean CHANGING gv_filt.
-
   IF p_mnew = 'X'.
     " User-style: search new candidates (same chain as the user cockpit)
     PERFORM select_candidate_documents USING p_bukrs.
@@ -71,11 +69,15 @@ START-OF-SELECTION.
     PERFORM filter_active_cycle.
     PERFORM calculate_credit.
     PERFORM flag_not_candidates.
+    PERFORM get_status_filter_search USING p_sre p_snc p_ser CHANGING gr_status_filt.
+    PERFORM apply_status_filter USING gr_status_filt.
   ELSE.
     " User-style view (P_MVIEW) or admin review (P_MADM) - both start
     " from the same persisted data, just shown on different screens.
     PERFORM refresh_from_db USING p_bukrs.
-    PERFORM apply_screen_filter USING gv_filt.
+    PERFORM get_status_filter_view USING p_vca p_vap p_vpg p_vpo p_vcd p_vrr p_vrv p_ver
+                                 CHANGING gr_status_filt.
+    PERFORM apply_status_filter USING gr_status_filt.
   ENDIF.
   PERFORM build_celltab.
   PERFORM build_status_icons.

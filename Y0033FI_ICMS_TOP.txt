@@ -132,16 +132,13 @@ CONSTANTS:
     link_error TYPE char20 VALUE 'LINK_ERROR',
   END OF gc_edoc_status.
 
-* Screen filter domain (user/admin cockpit selection) - short codes
-* are fine here, this is a screen parameter, never persisted.
-CONSTANTS:
-  BEGIN OF gc_filter,
-    all       TYPE char1 VALUE 'A',
-    attention TYPE char1 VALUE 'T',
-    new_cand  TYPE char1 VALUE 'N',
-    processed TYPE char1 VALUE 'P',
-    clean     TYPE char1 VALUE 'C',  " candidates only, no ERROR items
-  END OF gc_filter.
+* CR16002 status filter checkboxes - replaced the old single-choice
+* GC_FILTER categories (All/Needs attention/.../Clean). See FORM
+* GET_STATUS_FILTER_SEARCH/GET_STATUS_FILTER_VIEW/APPLY_STATUS_FILTER
+* in Y0033FI_ICMS_F01. TY_R_STATUS is a plain SELECT-OPTIONS-style
+* range table so it works both for LOOP/DELETE on GIT_ITEM (in-memory)
+* and, if ever needed, directly in a WHERE against the DB.
+TYPES ty_r_status TYPE RANGE OF y0033fi_icm_status_n.
 
 *&---------------------------------------------------------------------*
 *& Types
@@ -277,8 +274,9 @@ DATA:
   go_cc      TYPE REF TO cl_gui_custom_container,
   gv_id_exec TYPE char20,
   gv_waers   TYPE waers,
-  gv_filt    TYPE char1,  " derived from the P_FALL/P_FATT/P_FNEW/P_FPROC
-                           " radio buttons - see FORM GET_SCREEN_FILTER
+  gr_status_filt TYPE ty_r_status,  " status codes checked on the filter
+                           " checkboxes - see FORM GET_STATUS_FILTER_SEARCH/
+                           " GET_STATUS_FILTER_VIEW/APPLY_STATUS_FILTER
   gv_ucomm   TYPE sy-ucomm.  " shared by every MODULE ... INPUT - MODULE
                               " blocks do not have their own local DATA
                               " scope like FORM does, so this must be

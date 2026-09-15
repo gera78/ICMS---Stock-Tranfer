@@ -40,7 +40,7 @@ MODULE user_command_0100 INPUT.
       IF p_mview = 'X'.
         PERFORM delete_candidates.
         PERFORM refresh_from_db USING p_bukrs.
-        PERFORM apply_screen_filter USING gv_filt.
+        PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
         PERFORM build_status_icons.
         PERFORM build_color_tab.
@@ -50,7 +50,7 @@ MODULE user_command_0100 INPUT.
       IF p_mview = 'X'.
         PERFORM approve_candidates.
         PERFORM refresh_from_db USING p_bukrs.
-        PERFORM apply_screen_filter USING gv_filt.
+        PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
         PERFORM build_status_icons.
         PERFORM build_color_tab.
@@ -60,7 +60,7 @@ MODULE user_command_0100 INPUT.
       IF p_mview = 'X'.
         PERFORM request_reversal.
         PERFORM refresh_from_db USING p_bukrs.
-        PERFORM apply_screen_filter USING gv_filt.
+        PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
         PERFORM build_status_icons.
         PERFORM build_color_tab.
