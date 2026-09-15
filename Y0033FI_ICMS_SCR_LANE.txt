@@ -1,0 +1,61 @@
+*&---------------------------------------------------------------------*
+*& Include Y0033FI_ICMS_SCR_LANE
+*&---------------------------------------------------------------------*
+*& CR 16002 - PBO/PAI modules for screen 300 ("Maintain Corridors",
+*& editable ALV on Y0033FI_ICM_LANE). Included only by
+*& Y0033FI_ICM_STOCK_TRANSFER_ADM, after Y0033FI_ICMS_F02 (the forms
+*& called here - LOAD_LANE_TABLE, BUILD_LANE_FIELDCAT,
+*& SAVE_LANE_TABLE - live there).
+*&---------------------------------------------------------------------*
+
+MODULE status_0300 OUTPUT.
+  SET PF-STATUS 'STATUS_0300'.
+  SET TITLEBAR 'TITLE_0300'.
+
+  IF go_cc_lane IS NOT BOUND.
+    CREATE OBJECT go_cc_lane EXPORTING container_name = 'CC_LANE'.
+    CREATE OBJECT go_alv_lane EXPORTING i_parent = go_cc_lane.
+    PERFORM load_lane_table.
+    PERFORM build_lane_fieldcat.
+    go_alv_lane->set_table_for_first_display(
+      EXPORTING is_layout = VALUE lvc_s_layo( sel_mode = 'A' zebra = 'X' edit = 'X' cwidth_opt = 'X' )
+      CHANGING it_outtab = git_lane it_fieldcatalog = gt_fcat_lane ).
+  ELSE.
+    go_alv_lane->refresh_table_display( ).
+  ENDIF.
+ENDMODULE.
+
+MODULE user_command_0300 INPUT.
+  gv_ucomm = sy-ucomm.
+  CLEAR sy-ucomm.
+
+  CASE gv_ucomm.
+    WHEN 'ADD_ROW'.
+      go_alv_lane->check_changed_data( ).
+      APPEND VALUE y0033fi_icm_lane( active     = abap_true
+                                      valid_from = sy-datum
+                                      valid_to   = '99991231' ) TO git_lane.
+      go_alv_lane->refresh_table_display( ).
+    WHEN 'DEL_ROW'.
+      go_alv_lane->check_changed_data( ).
+      DATA lt_rows TYPE lvc_t_row.
+      go_alv_lane->get_selected_rows( IMPORTING et_index_rows = lt_rows ).
+      SORT lt_rows BY index DESCENDING.
+      LOOP AT lt_rows INTO DATA(ls_row).
+        DELETE git_lane INDEX ls_row-index.
+      ENDLOOP.
+      go_alv_lane->refresh_table_display( ).
+    WHEN 'SAVE'.
+      go_alv_lane->check_changed_data( ).
+      PERFORM save_lane_table.
+      PERFORM load_lane_table.
+      go_alv_lane->refresh_table_display( ).
+    " &F03/&F12/&F15 are the raw system function codes some SAP GUI
+    " toolbar icons send instead of BACK/EXIT/CANC - catching both.
+    WHEN 'BACK' OR 'EXIT' OR 'CANC' OR 'CANCEL' OR '&F03' OR '&F12' OR '&F15'.
+      go_cc_lane->free( ).
+      CLEAR go_cc_lane.
+      CLEAR go_alv_lane.
+      LEAVE TO SCREEN 0.
+  ENDCASE.
+ENDMODULE.

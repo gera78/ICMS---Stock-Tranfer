@@ -1,0 +1,52 @@
+*&---------------------------------------------------------------------*
+*& Report  Y0033FI_ICM_STOCK_TRANSFER
+*&---------------------------------------------------------------------*
+*& CR 16002 - User cockpit. Two modes on one screen:
+*&   1) Search new candidates (assess ICMS benefit, save as NEW)
+*&   2) View my candidates (approve / request reversal), with a
+*&      status filter that defaults to "needs attention"
+*&
+*& This program never posts or reverses accounting documents - it has
+*& no F02 include. Posting/reversal only happens in the admin program
+*& Y0033FI_ICM_STOCK_TRANSFER_ADM.
+*&---------------------------------------------------------------------*
+REPORT y0033fi_icm_stock_transfer MESSAGE-ID y0033icms.
+
+INCLUDE y0033fi_icms_top.
+INCLUDE y0033fi_icms_scr_usr.
+INCLUDE y0033fi_icms_f01.
+
+*&---------------------------------------------------------------------*
+*& Main processing
+*&---------------------------------------------------------------------*
+START-OF-SELECTION.
+  PERFORM get_company_currency USING p_bukrs CHANGING gv_waers.
+  PERFORM get_params USING p_bukrs.
+  PERFORM get_screen_filter USING p_fall p_fatt p_fnew p_fproc p_fclean CHANGING gv_filt.
+
+  IF p_mnew = 'X'.
+    PERFORM select_candidate_documents USING p_bukrs.
+    PERFORM read_items_and_icms.
+    PERFORM determine_benefit_percentage.
+    PERFORM filter_active_cycle.
+    PERFORM calculate_credit.
+    PERFORM flag_not_candidates.
+  ELSE.
+    PERFORM refresh_from_db USING p_bukrs.
+    PERFORM apply_screen_filter USING gv_filt.
+  ENDIF.
+  PERFORM build_celltab.
+  PERFORM build_status_icons.
+  PERFORM build_color_tab.
+
+END-OF-SELECTION.
+  IF git_item IS INITIAL.
+    MESSAGE s001(y0033icms).
+  ELSE.
+    CALL SCREEN 100.
+  ENDIF.
+
+*&---------------------------------------------------------------------*
+*& Screen 100 - PBO/PAI in a separate include
+*&---------------------------------------------------------------------*
+INCLUDE y0033fi_icms_scr_100.

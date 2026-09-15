@@ -1,0 +1,65 @@
+*&---------------------------------------------------------------------*
+*& Include Y0033FI_ICMS_SCR_ADM
+*&---------------------------------------------------------------------*
+*& CR 16002 - Selection screen for Y0033FI_ICM_STOCK_TRANSFER_ADM.
+*& Same fields whether the program runs interactively or in
+*& background (SY-BATCH) - see START-OF-SELECTION in the main program.
+*&
+*& Admin now also has access to the user-style actions (search new
+*& candidates / view+approve+request reversal), reusing screen 100
+*& and Y0033FI_ICMS_SCR_100 - the mode radio button below decides
+*& which screen the program opens.
+*&---------------------------------------------------------------------*
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
+PARAMETERS:
+  p_bukrs TYPE bukrs OBLIGATORY.
+SELECT-OPTIONS:
+  s_datum  FOR sy-datum,
+  s_nfenum FOR j_1bnfdoc-nfenum,
+* S_LCTO only applies in view/admin-review mode - nothing is posted
+* yet in search mode, so it is hidden there.
+  s_lcto   FOR sy-datum MODIF ID fv.
+SELECTION-SCREEN END OF BLOCK b1.
+
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-b02.
+* Mode - single choice. P_MNEW/P_MVIEW give the admin the same
+* actions the user cockpit has (screen 100, via the shared
+* Y0033FI_ICMS_SCR_100 include); P_MADM is the original admin review
+* screen (screen 200) - kept as the default to preserve prior
+* behavior for anyone already used to this program.
+* USER-COMMAND on P_MNEW forces an immediate screen refresh on click
+* (without it, AT SELECTION-SCREEN OUTPUT only reruns on the next
+* Enter/round trip, so the filter block below would not hide/show
+* right away).
+PARAMETERS:
+  p_mnew  RADIOBUTTON GROUP mod USER-COMMAND mod_chg,  " search new candidates (user-style)
+  p_mview RADIOBUTTON GROUP mod,                        " view my candidates (user-style)
+  p_madm  RADIOBUTTON GROUP mod DEFAULT 'X',             " admin review (original behavior)
+  p_mparm RADIOBUTTON GROUP mod,                         " General Parameters (screen 400)
+  p_mlane RADIOBUTTON GROUP mod.                         " Maintain Corridors (screen 300)
+SELECTION-SCREEN END OF BLOCK b2.
+
+SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE TEXT-b03.
+* Filter - applies to P_MVIEW and P_MADM (not P_MNEW, which searches
+* fresh candidates instead of filtering existing ones). Single choice,
+* one radio button per option; selection text of each field is the
+* label shown next to its button.
+PARAMETERS:
+  p_fall  RADIOBUTTON GROUP filt MODIF ID fv,               " All
+  p_fatt  RADIOBUTTON GROUP filt DEFAULT 'X' MODIF ID fv,    " Needs attention (default)
+  p_fnew  RADIOBUTTON GROUP filt MODIF ID fv,                " New candidates only
+  p_fproc RADIOBUTTON GROUP filt MODIF ID fv,                " Processed (Approved/Posted/Reversed)
+  p_fclean RADIOBUTTON GROUP filt MODIF ID fv.               " Candidates only, no ERROR items
+SELECTION-SCREEN END OF BLOCK b3.
+
+INITIALIZATION.
+  gv_id_exec = sy-uname && sy-datum && sy-uzeit.
+
+AT SELECTION-SCREEN OUTPUT.
+  LOOP AT SCREEN.
+    IF screen-group1 = 'FV' AND ( p_mnew = 'X' OR p_mparm = 'X' OR p_mlane = 'X' ).
+      screen-active = 0.  " hide entirely - filter doesn't apply to these modes
+      MODIFY SCREEN.
+    ENDIF.
+  ENDLOOP.

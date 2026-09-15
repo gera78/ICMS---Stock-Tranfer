@@ -1,0 +1,376 @@
+*&---------------------------------------------------------------------*
+*& Include Y0033FI_ICMS_TOP
+*&---------------------------------------------------------------------*
+*& CR 16002 - Shared data declarations for the user cockpit and admin
+*& programs. Included by both Y0033FI_ICM_STOCK_TRANSFER and
+*& Y0033FI_ICM_STOCK_TRANSFER_ADM.
+*&---------------------------------------------------------------------*
+
+TYPE-POOLS: icon.  " ICON_LED_GREEN and friends, used by BUILD_STATUS_ICONS in Y0033FI_ICMS_F01
+
+TABLES: j_1bnfdoc.
+
+*&---------------------------------------------------------------------*
+*& Constants
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*& Business parameters - loaded from Y0033FI_ICM_PARM (per BUKRS),
+*& NOT hardcoded constants anymore. See FORM GET_PARAMS in
+*& Y0033FI_ICMS_F01, called once per BUKRS at the start of both main
+*& programs, right alongside GET_COMPANY_CURRENCY. Maintained via the
+*& "Maintain Parameters" screen (400) in the admin program - see
+*& Y0033FI_ICMS_SCR_PARAM / FORM SHOW_PARAM_MAINTENANCE.
+*&---------------------------------------------------------------------*
+DATA:
+  gv_taxgrp_icms TYPE j_1bnfstx-taxgrp,
+  gv_kschl_yrb1  TYPE konh-kschl,
+  gv_land1       TYPE t005-land1,
+  gv_gl_debit    TYPE hkont,
+  gv_gl_credit   TYPE hkont,
+  gv_doc_type    TYPE blart,
+  gv_edoc_type   TYPE char10,
+  gv_program_id  TYPE char30.
+
+* eDocument PROC_STATUS values considered "Completed" for candidate
+* selection (source: EDOPROCSTATUS for EDOC_TYPE = BR_IN_ST).
+* TODO (Q2-b): confirm whether COMP_MAN (Completed Manually) should
+* also count, or only COMP_OK - currently both are included.
+CONSTANTS:
+  BEGIN OF gc_edoc_proc_status,
+    completed_ok  TYPE char10 VALUE 'COMP_OK',
+    completed_man TYPE char10 VALUE 'COMP_MAN',
+  END OF gc_edoc_proc_status.
+
+* eDocument PROC_STATUS values that may indicate the NF-e was
+* cancelled at the eDocument process level (name-based reading of the
+* EDOPROCSTATUS list - the shipped short texts looked shifted by one
+* row, so this is inferred from the field names, not the short texts;
+* please confirm). Not used yet by CHECK_NF_CANCELLATION - kept here
+* for when Q2-c below is answered.
+CONSTANTS:
+  BEGIN OF gc_edoc_proc_cancel,
+    nfe_canc TYPE char10 VALUE 'NFE_CANC',
+    sta_canc TYPE char10 VALUE 'STA_CANC',
+  END OF gc_edoc_proc_cancel.
+* TODO (Q2-c): confirm whether these should be used as an additional/
+* alternative cancellation signal alongside J_1BNFDOC-CANCEL.
+
+* STATUS domain (see CR16002_DDIC_SPEC.md) - long, self-explanatory
+* values by design (development team is English-speaking).
+CONSTANTS:
+  BEGIN OF gc_status,
+    ready_to_save      TYPE char20 VALUE 'READY_TO_SAVE', " in-memory only, never persisted - see CALCULATE_CREDIT/SAVE_CANDIDATES
+    candidate          TYPE char20 VALUE 'CANDIDATE',
+    approved           TYPE char20 VALUE 'APPROVED',
+    posting            TYPE char20 VALUE 'POSTING',
+    posted             TYPE char20 VALUE 'POSTED',
+    cancel_detected    TYPE char20 VALUE 'CANCEL_DETECTED',
+    reversal_requested TYPE char20 VALUE 'REVERSAL_REQUESTED',
+    reversed           TYPE char20 VALUE 'REVERSED',
+    error              TYPE char20 VALUE 'ERROR',
+    not_candidate      TYPE char20 VALUE 'NOT_CANDIDATE', " in-memory only, never persisted - item found and calculated fine, but has no ICMS value or no credit, so it's not a real candidate
+  END OF gc_status.
+
+* LOG-ACTION domain
+CONSTANTS:
+  BEGIN OF gc_action,
+    candidate_saved    TYPE char20 VALUE 'CANDIDATE_SAVED',
+    candidate_deleted  TYPE char20 VALUE 'CANDIDATE_DELETED',
+    approved           TYPE char20 VALUE 'APPROVED',
+    posting_started    TYPE char20 VALUE 'POSTING_STARTED',
+    posted             TYPE char20 VALUE 'POSTED',
+    cancel_detected    TYPE char20 VALUE 'CANCEL_DETECTED',
+    reversal_requested TYPE char20 VALUE 'REVERSAL_REQUESTED',
+    reversed           TYPE char20 VALUE 'REVERSED',
+    error              TYPE char20 VALUE 'ERROR',
+    period_fallback    TYPE char20 VALUE 'PERIOD_FALLBACK',
+    bapi_detail        TYPE char20 VALUE 'BAPI_DETAIL', " supplementary BAPI message, not a real transition - STATUS_FROM = STATUS_TO
+  END OF gc_action.
+
+* Reversal trigger domain
+CONSTANTS:
+  BEGIN OF gc_trigger,
+    manual      TYPE char20 VALUE 'MANUAL',
+    nf_canceled TYPE char20 VALUE 'NF_CANCELED',
+  END OF gc_trigger.
+
+* Y0033FI_ICM_EDOC-STATUS domain
+CONSTANTS:
+  BEGIN OF gc_edoc_status,
+    active     TYPE char20 VALUE 'ACTIVE',
+    deleted    TYPE char20 VALUE 'DELETED',
+    link_error TYPE char20 VALUE 'LINK_ERROR',
+  END OF gc_edoc_status.
+
+* Screen filter domain (user/admin cockpit selection) - short codes
+* are fine here, this is a screen parameter, never persisted.
+CONSTANTS:
+  BEGIN OF gc_filter,
+    all       TYPE char1 VALUE 'A',
+    attention TYPE char1 VALUE 'T',
+    new_cand  TYPE char1 VALUE 'N',
+    processed TYPE char1 VALUE 'P',
+    clean     TYPE char1 VALUE 'C',  " candidates only, no ERROR items
+  END OF gc_filter.
+
+*&---------------------------------------------------------------------*
+*& Types
+*&---------------------------------------------------------------------*
+TYPES:
+  BEGIN OF ty_item,
+    sel          TYPE c LENGTH 1,        " ALV row selection checkbox
+    docnum       TYPE j_1bnfdoc-docnum,
+    itmnum       TYPE j_1bnflin-itmnum,
+    seqnr        TYPE n LENGTH 3,
+    nfenum       TYPE j_1bnfdoc-nfenum,
+    series       TYPE j_1bnfdoc-series,
+    bukrs        TYPE j_1bnfdoc-bukrs,
+    branch       TYPE j_1bnfdoc-branch,
+    docdat       TYPE j_1bnfdoc-docdat,
+    cancel       TYPE j_1bnfdoc-cancel,
+    land1        TYPE j_1bnfdoc-land1,
+    regio_orig   TYPE t005u-bland,       " from the matched Y0033FI_ICM_LANE row (ORIGIN_REGION) - Q1 resolved via config
+    regio_dest   TYPE t005u-bland,       " from the matched Y0033FI_ICM_LANE row (DEST_REGION)
+    lane_match_level TYPE n LENGTH 1,    " specificity of the Y0033FI_ICM_LANE row that matched, for audit
+    werks_orig   TYPE werks_d,           " not currently populated - no confirmed source field
+    werks_dest   TYPE werks_d,           " from EDOBRINCOMING-PLANT
+    edoc_guid    TYPE char32,            " eDocument GUID used as source for this cycle (fixed evidence)
+    accesskey    TYPE char44,            " NF-e access key, cross-check evidence only
+    materialdoc  TYPE char10,            " informative only, not used for matching
+    materialdoc_year TYPE n LENGTH 4,    " informative only, not used for matching
+    matnr        TYPE j_1bnflin-matnr,
+    matorg       TYPE j_1bnflin-matorg,
+    mwskz        TYPE j_1bnflin-mwskz,  " tax code, per item - may be blank
+    prctr        TYPE j_1bnflin-prctr,  " profit center, per item - may be blank
+    menge        TYPE j_1bnflin-menge,
+    menge_unit   TYPE meins,           " unit of measure - reference field for MENGE (QUAN type)
+    netwr        TYPE j_1bnflin-netwr,
+    icms_base    TYPE j_1bnfstx-base,
+    icms_excbas  TYPE j_1bnfstx-excbas,
+    icms_othbas  TYPE j_1bnfstx-othbas,
+    icms_rate    TYPE j_1bnfstx-rate,
+    icms_val     TYPE j_1bnfstx-taxval,
+    stx_seq      TYPE n LENGTH 3,
+    kschl        TYPE konh-kschl,
+    knumh        TYPE konh-knumh,
+    datab        TYPE konh-datab,
+    datbi        TYPE konh-datbi,
+    benefit_percent    TYPE konp-kbetr,
+    kpein        TYPE konp-kpein,
+    kmein        TYPE konp-kmein,
+    credit_amount  TYPE j_1bnfstx-taxval,
+    waers        TYPE waers,
+    status       TYPE char20,
+    cre_user     TYPE syuname,
+    cre_date     TYPE dats,
+    cre_time     TYPE tims,
+    apr_user     TYPE syuname,
+    apr_date     TYPE dats,
+    apr_time     TYPE tims,
+    belnr_fi     TYPE belnr_d,
+    gjahr_fi     TYPE gjahr,
+    buzei_fi     TYPE buzei,
+    bldat_fi     TYPE bldat,
+    budat_fi     TYPE budat,
+    period_fallback TYPE char1,
+    canc_det_date TYPE dats,
+    canc_det_time TYPE tims,
+    canc_det_user TYPE syuname,
+    reversal_trigger  TYPE char20,
+    reversal_req_user TYPE syuname,
+    reversal_req_date TYPE dats,
+    reversal_req_time TYPE tims,
+    reversal_exec_user TYPE syuname,
+    reversal_exec_date TYPE dats,
+    reversal_exec_time TYPE tims,
+    reversal_belnr    TYPE belnr_d,
+    reversal_gjahr    TYPE gjahr,
+    id_exec       TYPE char20,
+    msg           TYPE char200,
+    status_icon   TYPE icon_d,       " traffic-light icon for STATUS - see BUILD_STATUS_ICONS
+    color_tab     TYPE lvc_t_scol,  " per-cell font color (Benefit %/ICMS Credit) - see BUILD_COLOR_TAB
+    celltab       TYPE lvc_t_styl,  " per-cell style: disables every
+                                     " column except SEL, so the grid
+                                     " doesn't look editable everywhere
+  END OF ty_item,
+  ty_it_item TYPE STANDARD TABLE OF ty_item WITH DEFAULT KEY.
+
+TYPES:
+  " Key is EDOC_GUID only (see CR16002_DDIC_SPEC.md) - DOCNUM may be
+  " blank when the eDocument could not be linked to any nota fiscal
+  " (STATUS = LINK_ERROR).
+  BEGIN OF ty_edoc,
+    edoc_guid     TYPE char32,
+    docnum        TYPE j_1bnfdoc-docnum,
+    match_count   TYPE n LENGTH 1,   " 0/1/2+ J_1BNFDOC candidates found for NFENUM+SERIES+PLANT
+    accesskey     TYPE char44,
+    materialdoc   TYPE char10,
+    materialdoc_year TYPE n LENGTH 4,
+    seqnr         TYPE n LENGTH 3,
+    edoc_process  TYPE char10,
+    edoc_status   TYPE char10,
+    status        TYPE char20,   " gc_edoc_status: ACTIVE / DELETED / LINK_ERROR
+    first_seen_date TYPE dats,
+    first_seen_time TYPE tims,
+    last_seen_date  TYPE dats,
+    last_seen_time  TYPE tims,
+    del_det_date  TYPE dats,
+    del_det_time  TYPE tims,
+    del_det_user  TYPE syuname,
+    backup_ref    TYPE char32,   " see CR16002_DDIC_SPEC.md, Y0033FI_ICM_EDOC
+  END OF ty_edoc,
+  ty_it_edoc TYPE STANDARD TABLE OF ty_edoc WITH DEFAULT KEY.
+
+TYPES:
+  " Mirrors the 7 Y0033FI_ICM_LANE key fields, sourced from EDOBRINCOMING,
+  " used as input to FORM MATCH_LANE.
+  BEGIN OF ty_lane_key,
+    bukrs         TYPE bukrs,
+    vendor_code   TYPE char10,
+    vendor_tax_id TYPE char18,
+    vendor_region TYPE t005u-bland,
+    country       TYPE land1,
+    plant_code    TYPE werks_d,
+    plant_region  TYPE t005u-bland,
+  END OF ty_lane_key.
+
+*&---------------------------------------------------------------------*
+*& Global data (shared)
+*&---------------------------------------------------------------------*
+DATA:
+  git_item   TYPE ty_it_item,
+  gwa_item   TYPE ty_item,
+  gt_fcat    TYPE lvc_t_fcat,
+  gt_sort    TYPE lvc_t_sort,  " default sort - see FORM BUILD_SORT_TABLE
+  go_alv     TYPE REF TO cl_gui_alv_grid,
+  go_cc      TYPE REF TO cl_gui_custom_container,
+  gv_id_exec TYPE char20,
+  gv_waers   TYPE waers,
+  gv_filt    TYPE char1,  " derived from the P_FALL/P_FATT/P_FNEW/P_FPROC
+                           " radio buttons - see FORM GET_SCREEN_FILTER
+  gv_ucomm   TYPE sy-ucomm.  " shared by every MODULE ... INPUT - MODULE
+                              " blocks do not have their own local DATA
+                              " scope like FORM does, so this must be
+                              " declared once, globally, not re-declared
+                              " with DATA inside each MODULE
+
+* Lane maintenance screen (admin only, screen 300) - see
+* Y0033FI_ICMS_F02 FORM SHOW_LANE_MAINTENANCE and friends.
+DATA:
+  git_lane      TYPE STANDARD TABLE OF y0033fi_icm_lane WITH DEFAULT KEY,
+  gt_fcat_lane  TYPE lvc_t_fcat,
+  go_alv_lane   TYPE REF TO cl_gui_alv_grid,
+  go_cc_lane    TYPE REF TO cl_gui_custom_container.
+
+* Parameter maintenance screen (admin only, screen 400) - see
+* Y0033FI_ICMS_F02 FORM SHOW_PARAM_MAINTENANCE and friends.
+DATA:
+  git_param     TYPE STANDARD TABLE OF y0033fi_icm_parm WITH DEFAULT KEY,
+  gt_fcat_param TYPE lvc_t_fcat,
+  go_alv_param  TYPE REF TO cl_gui_alv_grid,
+  go_cc_param   TYPE REF TO cl_gui_custom_container.
+
+*&---------------------------------------------------------------------*
+*& Class LCL_ALV_EVENTS - hotspot click handler (shared)
+*&---------------------------------------------------------------------*
+*& Handles clicks on the EDOC_GUID and BELNR_FI columns of the main
+*& item grid (screens 100/200 - see BUILD_FIELDCAT in Y0033FI_ICMS_F01
+*& for the HOTSPOT = 'X' marking). Registered once per grid via
+*& SET HANDLER in each screen's PBO module.
+*&---------------------------------------------------------------------*
+CLASS lcl_alv_events DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS on_hotspot_click
+      FOR EVENT hotspot_click OF cl_gui_alv_grid
+      IMPORTING e_row_id e_column_id.
+ENDCLASS.
+
+CLASS lcl_alv_events IMPLEMENTATION.
+
+  METHOD on_hotspot_click.
+
+    READ TABLE git_item INTO gwa_item INDEX e_row_id-index.
+    CHECK sy-subrc = 0.
+
+    CASE e_column_id-fieldname.
+
+      WHEN 'DOCNUM'.
+        CHECK gwa_item-docnum IS NOT INITIAL.
+        " J1BNFE is a Report Transaction (screen 1000 of
+        " J_1BNFE_MONITOR) - confirmed the BUK/JEF SET PARAMETER ID
+        " approach doesn't reliably work because Document Number is a
+        " SELECT-OPTIONS (range) field on that report, and
+        " SET PARAMETER ID only works for single-value PARAMETER
+        " fields. Using SUBMIT directly instead - same pattern as
+        " EDOC_COCKPIT. Selection text for the field is confirmed as
+        " DOCNUM.
+        DATA: BEGIN OF ls_so_docnum,
+                sign   TYPE c LENGTH 1 VALUE 'I',
+                option TYPE c LENGTH 2 VALUE 'EQ',
+                low    TYPE j_1bdocnum,
+                high   TYPE j_1bdocnum,
+              END OF ls_so_docnum.
+        DATA lt_so_docnum LIKE TABLE OF ls_so_docnum.
+
+        CLEAR ls_so_docnum-high.
+        ls_so_docnum-low = gwa_item-docnum.
+        APPEND ls_so_docnum TO lt_so_docnum.
+
+        " CREDAT (Created On, from J_1BNFE_ACTIV-CREDAT, data element
+        " J_1BCREDAT - confirmed via F1 -> Technical Information)
+        " defaults to today when left blank, which excludes older
+        " documents - pass a wide range instead so it never restricts anything. BUKRS is filled directly (best
+        " guess: a single PARAMETER, the common case for a company
+        " code field) - if either field turns out to be the other
+        " type (PARAMETER vs SELECT-OPTIONS), this SUBMIT fails to
+        " activate with a clear syntax error naming the field, easy
+        " to fix from there.
+        DATA: BEGIN OF ls_so_credat,
+                sign   TYPE c LENGTH 1 VALUE 'I',
+                option TYPE c LENGTH 2 VALUE 'BT',
+                low    TYPE dats VALUE '19000101',
+                high   TYPE dats VALUE '99991231',
+              END OF ls_so_credat.
+        DATA lt_so_credat LIKE TABLE OF ls_so_credat.
+        APPEND ls_so_credat TO lt_so_credat.
+
+        SUBMIT j_1bnfe_monitor
+          WITH docnum IN lt_so_docnum
+          WITH bukrs = gwa_item-bukrs
+          WITH  date0 IN lt_so_credat
+          AND RETURN.
+
+
+      WHEN 'BELNR_FI'.
+        CHECK gwa_item-belnr_fi IS NOT INITIAL.
+        SET PARAMETER ID 'BUK' FIELD gwa_item-bukrs.
+        SET PARAMETER ID 'BLN' FIELD gwa_item-belnr_fi.
+        SET PARAMETER ID 'GJR' FIELD gwa_item-gjahr_fi.
+        CALL TRANSACTION 'FB03' AND SKIP FIRST SCREEN.
+
+      WHEN 'EDOC_GUID'.
+        CHECK gwa_item-edoc_guid IS NOT INITIAL.
+        " Confirmed pattern, reused from an existing program in this
+        " landscape: EDOC_COCKPIT is a report (SUBMIT), not a
+        " transaction, filtered via its SO_GUID selection option.
+        DATA: BEGIN OF ls_so_guid,
+                sign   TYPE c LENGTH 1 VALUE 'I',
+                option TYPE c LENGTH 2 VALUE 'EQ',
+                low    TYPE char32,
+                high   TYPE char32,
+              END OF ls_so_guid.
+        DATA lt_so_guid LIKE TABLE OF ls_so_guid.
+
+        CLEAR ls_so_guid-high.
+        ls_so_guid-low = gwa_item-edoc_guid.
+        APPEND ls_so_guid TO lt_so_guid.
+
+        SUBMIT edoc_cockpit
+          WITH so_guid IN lt_so_guid
+          AND RETURN.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+ENDCLASS.

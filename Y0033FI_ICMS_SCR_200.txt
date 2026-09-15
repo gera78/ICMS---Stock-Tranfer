@@ -1,0 +1,59 @@
+*&---------------------------------------------------------------------*
+*& Include Y0033FI_ICMS_SCR_200
+*&---------------------------------------------------------------------*
+*& CR 16002 - PBO/PAI modules for screen 200 (admin cockpit ALV:
+*& approved candidates, Create Document(s) / Check Cancellations /
+*& Execute Reversal / Maintain Corridors). Included only by
+*& Y0033FI_ICM_STOCK_TRANSFER_ADM, after Y0033FI_ICMS_F02 (the forms
+*& called here live there).
+*&---------------------------------------------------------------------*
+
+MODULE status_0200 OUTPUT.
+  SET PF-STATUS 'STATUS_0200'.
+  SET TITLEBAR 'TITLE_0200'.
+
+  IF go_cc IS NOT BOUND.
+    CREATE OBJECT go_cc EXPORTING container_name = 'CC_ALV'.
+    CREATE OBJECT go_alv EXPORTING i_parent = go_cc.
+    SET HANDLER lcl_alv_events=>on_hotspot_click FOR go_alv.
+    PERFORM build_fieldcat USING 'A'.
+    PERFORM build_sort_table.
+    go_alv->set_table_for_first_display(
+      EXPORTING is_layout = VALUE lvc_s_layo( sel_mode = 'A' zebra = 'X' edit = 'X' stylefname = 'CELLTAB' ctab_fname = 'COLOR_TAB' cwidth_opt = 'X' )
+      CHANGING it_outtab = git_item it_fieldcatalog = gt_fcat it_sort = gt_sort ).
+  ELSE.
+    go_alv->refresh_table_display( ).
+  ENDIF.
+ENDMODULE.
+
+MODULE user_command_0200 INPUT.
+  gv_ucomm = sy-ucomm.
+  CLEAR sy-ucomm.
+  go_alv->check_changed_data( ).
+
+  CASE gv_ucomm.
+    WHEN 'POST'.
+      PERFORM post_released_items.
+      LEAVE TO SCREEN 0. " re-run selection to reflect DB state
+    WHEN 'CHECK_CANC'.
+      PERFORM check_nf_cancellation.
+      LEAVE TO SCREEN 0.
+    WHEN 'EXEC_REV'.
+      PERFORM execute_reversal.
+      LEAVE TO SCREEN 0.
+    WHEN 'LANE'.
+      PERFORM show_lane_maintenance. " opens screen 300 modally, returns here on Back
+    WHEN 'PARAM'.
+      PERFORM show_param_maintenance. " opens screen 400 modally, returns here on Back
+    WHEN 'VIEW_LOG'.
+      PERFORM show_log_popup.
+    WHEN 'REFRESH'.
+      LEAVE TO SCREEN 0.
+    " &F03/&F12/&F15 are the raw system function codes some SAP GUI
+    " toolbar icons send instead of BACK/EXIT/CANC - catching both.
+    WHEN 'BACK' OR 'EXIT' OR 'CANC' OR 'CANCEL' OR '&F03' OR '&F12' OR '&F15'.
+      " Same reasoning as the user cockpit - returns to the selection
+      " screen instead of fully exiting.
+      LEAVE TO SCREEN 0.
+  ENDCASE.
+ENDMODULE.

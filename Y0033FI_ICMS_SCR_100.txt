@@ -1,0 +1,88 @@
+*&---------------------------------------------------------------------*
+*& Include Y0033FI_ICMS_SCR_100
+*&---------------------------------------------------------------------*
+*& CR 16002 - PBO/PAI modules for screen 100 (user cockpit ALV: search
+*& new candidates / view my candidates - Save, Approve, Request
+*& Reversal). Included only by Y0033FI_ICM_STOCK_TRANSFER, after
+*& Y0033FI_ICMS_F01 (the forms called here live there).
+*&---------------------------------------------------------------------*
+
+MODULE status_0100 OUTPUT.
+  SET PF-STATUS 'STATUS_0100'.
+  SET TITLEBAR 'TITLE_0100'.
+
+  IF go_cc IS NOT BOUND.
+    CREATE OBJECT go_cc EXPORTING container_name = 'CC_ALV'.
+    CREATE OBJECT go_alv EXPORTING i_parent = go_cc.
+    SET HANDLER lcl_alv_events=>on_hotspot_click FOR go_alv.
+    PERFORM build_fieldcat USING 'U'.
+    PERFORM build_sort_table.
+    go_alv->set_table_for_first_display(
+      EXPORTING is_layout = VALUE lvc_s_layo( sel_mode = 'A' zebra = 'X' edit = 'X' stylefname = 'CELLTAB' ctab_fname = 'COLOR_TAB' cwidth_opt = 'X' )
+      CHANGING it_outtab = git_item it_fieldcatalog = gt_fcat it_sort = gt_sort ).
+  ELSE.
+    go_alv->refresh_table_display( ).
+  ENDIF.
+ENDMODULE.
+
+MODULE user_command_0100 INPUT.
+  gv_ucomm = sy-ucomm.
+  CLEAR sy-ucomm.
+  go_alv->check_changed_data( ).
+
+  CASE gv_ucomm.
+    WHEN 'SAVE'.
+      IF p_mnew = 'X'.
+        PERFORM save_candidates USING gv_id_exec.
+        LEAVE TO SCREEN 0. " re-run selection to reflect DB state
+      ENDIF.
+    WHEN 'DEL_CAND'.
+      IF p_mview = 'X'.
+        PERFORM delete_candidates.
+        PERFORM refresh_from_db USING p_bukrs.
+        PERFORM apply_screen_filter USING gv_filt.
+        PERFORM build_celltab.
+        PERFORM build_status_icons.
+        PERFORM build_color_tab.
+        go_alv->refresh_table_display( ).
+      ENDIF.
+    WHEN 'APPROVE'.
+      IF p_mview = 'X'.
+        PERFORM approve_candidates.
+        PERFORM refresh_from_db USING p_bukrs.
+        PERFORM apply_screen_filter USING gv_filt.
+        PERFORM build_celltab.
+        PERFORM build_status_icons.
+        PERFORM build_color_tab.
+        go_alv->refresh_table_display( ).
+      ENDIF.
+    WHEN 'REQ_REV'.
+      IF p_mview = 'X'.
+        PERFORM request_reversal.
+        PERFORM refresh_from_db USING p_bukrs.
+        PERFORM apply_screen_filter USING gv_filt.
+        PERFORM build_celltab.
+        PERFORM build_status_icons.
+        PERFORM build_color_tab.
+        go_alv->refresh_table_display( ).
+      ENDIF.
+    WHEN 'SEL_ALL'.
+      PERFORM set_all_sel USING abap_true.
+      go_alv->refresh_table_display( ).
+    WHEN 'SEL_NONE'.
+      PERFORM set_all_sel USING abap_false.
+      go_alv->refresh_table_display( ).
+    WHEN 'VIEW_LOG'.
+      PERFORM show_log_popup.
+    WHEN 'REFRESH'.
+      LEAVE TO SCREEN 0.
+    " &F03/&F12/&F15 are the raw system function codes some SAP GUI
+    " toolbar icons send instead of BACK/EXIT/CANC - catching both.
+    WHEN 'BACK' OR 'EXIT' OR 'CANC' OR 'CANCEL' OR '&F03' OR '&F12' OR '&F15'.
+      " LEAVE TO SCREEN 0 (not LEAVE PROGRAM) ends only this screen;
+      " since nothing follows CALL SCREEN 100 in the main program, the
+      " report then naturally redisplays its own selection screen -
+      " this is what "Back" should feel like, not a full program exit.
+      LEAVE TO SCREEN 0.
+  ENDCASE.
+ENDMODULE.

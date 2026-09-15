@@ -1,0 +1,112 @@
+*&---------------------------------------------------------------------*
+*& Report  Y0033FI_ICM_STOCK_TRANSFER_ADM
+*&---------------------------------------------------------------------*
+*& CR 16002 - Admin program. Reuses the same TOP/F01 includes as the
+*& user cockpit, plus F02 (posting/reversal), which the user program
+*& does not include.
+*&
+*& Also reuses screen 100 and Y0033FI_ICMS_SCR_100 directly, so the
+*& admin can perform the same actions the user cockpit offers (search
+*& new candidates / view+approve+request reversal), in addition to
+*& the admin-only actions on screen 200 (Create Document(s) / Check
+*& Cancellations / Execute Reversal). The mode radio button on the
+*& selection screen decides which screen opens - see
+*& Y0033FI_ICMS_SCR_ADM:
+*&   P_MNEW/P_MVIEW -> screen 100 (user-style)
+*&   P_MADM         -> screen 200 (admin review)
+*&   P_MPARM        -> screen 400 (General Parameters) directly
+*&   P_MLANE        -> screen 300 (Maintain Corridors) directly
+*& The LANE/PARAM buttons on screen 200 still work too - this is just
+*& a faster path that skips loading any item list first.
+*&
+*& Background jobs always run the admin-only cycle regardless of the
+*& mode selected on screen, per the agreed requirement ("both button
+*& and job"): when SY-BATCH is set, Check Cancellations / Create
+*& Document(s) / Execute Reversal run automatically in sequence and
+*& no screen is shown.
+*&---------------------------------------------------------------------*
+REPORT y0033fi_icm_stock_transfer_adm MESSAGE-ID y0033icms.
+
+INCLUDE y0033fi_icms_top.
+INCLUDE y0033fi_icms_scr_adm.
+INCLUDE y0033fi_icms_f01.
+INCLUDE y0033fi_icms_f02.
+
+*&---------------------------------------------------------------------*
+*& Main processing
+*&---------------------------------------------------------------------*
+START-OF-SELECTION.
+  PERFORM get_company_currency USING p_bukrs CHANGING gv_waers.
+  PERFORM get_params USING p_bukrs.
+
+  IF sy-batch = abap_true.
+    " Background job: run the full admin cycle unattended, no screen,
+    " regardless of which mode radio button happens to be in the variant.
+    PERFORM check_nf_cancellation.
+    PERFORM post_released_items.
+    PERFORM execute_reversal.
+    WRITE: / 'Background run finished:', sy-datum, sy-uzeit.
+    RETURN.
+  ENDIF.
+
+  " General Parameters / Maintain Corridors - direct access, no item
+  " loading needed at all for these two config-only screens.
+  IF p_mparm = 'X'.
+    PERFORM show_param_maintenance.
+    RETURN.
+  ENDIF.
+
+  IF p_mlane = 'X'.
+    PERFORM show_lane_maintenance.
+    RETURN.
+  ENDIF.
+
+  PERFORM get_screen_filter USING p_fall p_fatt p_fnew p_fproc p_fclean CHANGING gv_filt.
+
+  IF p_mnew = 'X'.
+    " User-style: search new candidates (same chain as the user cockpit)
+    PERFORM select_candidate_documents USING p_bukrs.
+    PERFORM read_items_and_icms.
+    PERFORM determine_benefit_percentage.
+    PERFORM filter_active_cycle.
+    PERFORM calculate_credit.
+    PERFORM flag_not_candidates.
+  ELSE.
+    " User-style view (P_MVIEW) or admin review (P_MADM) - both start
+    " from the same persisted data, just shown on different screens.
+    PERFORM refresh_from_db USING p_bukrs.
+    PERFORM apply_screen_filter USING gv_filt.
+  ENDIF.
+  PERFORM build_celltab.
+  PERFORM build_status_icons.
+  PERFORM build_color_tab.
+
+END-OF-SELECTION.
+  IF sy-batch = abap_true.
+    RETURN.
+  ENDIF.
+
+  IF p_mparm = 'X' OR p_mlane = 'X'.
+    RETURN. " already handled directly in START-OF-SELECTION, no item list to show
+  ENDIF.
+
+  IF git_item IS INITIAL.
+    MESSAGE s001(y0033icms).
+  ELSEIF p_mnew = 'X' OR p_mview = 'X'.
+    CALL SCREEN 100.  " user-style actions - Save/Approve/Request Reversal
+  ELSE.
+    CALL SCREEN 200.  " admin-only actions
+  ENDIF.
+
+*&---------------------------------------------------------------------*
+*& Screen 100 (user-style, reused) - PBO/PAI in a shared include
+*&---------------------------------------------------------------------*
+INCLUDE y0033fi_icms_scr_100.
+
+*&---------------------------------------------------------------------*
+*& Screen 200 (admin cockpit) and screen 300 (Maintain Corridors) -
+*& PBO/PAI in separate includes
+*&---------------------------------------------------------------------*
+INCLUDE y0033fi_icms_scr_200.
+INCLUDE y0033fi_icms_scr_lane.
+INCLUDE y0033fi_icms_scr_param.
