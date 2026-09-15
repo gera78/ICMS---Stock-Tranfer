@@ -34,7 +34,15 @@ FORM post_released_items.
        OR status = @gc_status-post_failed.
 
   IF lt_approved IS INITIAL.
-    MESSAGE e007(y0033icms).
+    " Nothing to post is a normal, expected outcome (not every run has
+    " approved items) - TYPE E would flag the background job as ended
+    " in error in SM37 even though nothing actually went wrong, so it
+    " is only used interactively (screen 200 button), never in batch.
+    IF sy-batch = abap_true.
+      MESSAGE s007(y0033icms).
+    ELSE.
+      MESSAGE e007(y0033icms).
+    ENDIF.
     RETURN.
   ENDIF.
 
@@ -413,7 +421,13 @@ FORM execute_reversal.
     WHERE status = @gc_status-reversal_requested.
 
   IF lt_strq IS INITIAL.
-    MESSAGE e008(y0033icms).
+    " Same reasoning as POST_RELEASED_ITEMS above - no reversal
+    " requests pending is expected on most runs, not an error.
+    IF sy-batch = abap_true.
+      MESSAGE s008(y0033icms).
+    ELSE.
+      MESSAGE e008(y0033icms).
+    ENDIF.
     RETURN.
   ENDIF.
 
