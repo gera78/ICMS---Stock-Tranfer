@@ -40,7 +40,7 @@ START-OF-SELECTION.
   ENDIF.
   PERFORM build_celltab.
   PERFORM build_status_icons.
-  PERFORM build_color_tab.
+  PERFORM build_status_descr.
 
 END-OF-SELECTION.
   IF git_item IS INITIAL.

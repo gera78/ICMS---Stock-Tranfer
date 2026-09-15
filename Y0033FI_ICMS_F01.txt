@@ -772,8 +772,8 @@ FORM build_celltab.
           'BENEFIT_PERCENT' TO lt_fieldnames,
           'CREDIT_AMOUNT'   TO lt_fieldnames,
           'WAERS'        TO lt_fieldnames,
-          'STATUS'       TO lt_fieldnames,
           'STATUS_ICON'  TO lt_fieldnames,
+          'STATUS_DESCR' TO lt_fieldnames,
           'EDOC_GUID'    TO lt_fieldnames,
           'BELNR_FI'     TO lt_fieldnames,
           'BUZEI_FI'     TO lt_fieldnames,
@@ -803,10 +803,10 @@ ENDFORM.
 *&      Form  BUILD_STATUS_ICONS
 *&---------------------------------------------------------------------*
 * Maps each item's STATUS to a traffic-light icon shown in its own
-* ALV column (STATUS_ICON, see BUILD_FIELDCAT) - the STATUS text
-* column stays as-is, this is just a quick visual cue alongside it.
-* Icon names confirmed against this system's icon list (transaction
-* ICON) before use.
+* ALV column (STATUS_ICON, see BUILD_FIELDCAT) - STATUS_DESCR (see
+* BUILD_STATUS_DESCR) stays as-is, this is just a quick visual cue
+* alongside it. Icon names confirmed against this system's icon list
+* (transaction ICON) before use.
 *---------------------------------------------------------------------*
 FORM build_status_icons.
 
@@ -844,39 +844,33 @@ FORM build_status_icons.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
-*&      Form  BUILD_COLOR_TAB
+*&      Form  BUILD_STATUS_DESCR
 *&---------------------------------------------------------------------*
-* Colors the FONT (not the cell background) of BENEFIT_PERCENT and
-* CREDIT_AMOUNT red, for every row - via a per-cell color table
-* (CTAB_FNAME), not EMPHASIZE on the field catalog. EMPHASIZE kept
-* coloring the whole cell background even with the "inverse" flag set
-* (which should mean font-only), so this uses the more granular,
-* purpose-built LVC mechanism instead. COL = 6 (red); INT/INV left at
-* their defaults (0), which is font-only coloring for this API - if
-* it still shows as a filled cell, the SAP GUI theme itself may be
-* overriding this and would need a different investigation.
+* Builds "<code> - <description>" (e.g. "010 - Candidate") for the
+* STATUS_DESCR column, shown right next to STATUS_ICON in the grid -
+* lets the user learn the numeric codes over time instead of only
+* seeing the bare number.
 *---------------------------------------------------------------------*
-FORM build_color_tab.
-
-  DATA ls_scol TYPE lvc_s_scol.
-  DATA lt_scol TYPE lvc_t_scol.
+FORM build_status_descr.
 
   LOOP AT git_item INTO gwa_item.
     DATA(lv_tabix) = sy-tabix.
-    CLEAR lt_scol.
 
-    CLEAR ls_scol.
-    ls_scol-fname     = 'BENEFIT_PERCENT'.
-    ls_scol-color-col = 6. " red
-    APPEND ls_scol TO lt_scol.
+    CASE gwa_item-status.
+      WHEN gc_status-candidate.          gwa_item-status_descr = |{ gwa_item-status } - Candidate|.
+      WHEN gc_status-approved.           gwa_item-status_descr = |{ gwa_item-status } - Approved|.
+      WHEN gc_status-posting.            gwa_item-status_descr = |{ gwa_item-status } - Posting|.
+      WHEN gc_status-posted.             gwa_item-status_descr = |{ gwa_item-status } - Posted|.
+      WHEN gc_status-cancel_detected.    gwa_item-status_descr = |{ gwa_item-status } - Cancel Detected|.
+      WHEN gc_status-reversal_requested. gwa_item-status_descr = |{ gwa_item-status } - Reversal Requested|.
+      WHEN gc_status-reversed.           gwa_item-status_descr = |{ gwa_item-status } - Reversed|.
+      WHEN gc_status-ready_to_save.      gwa_item-status_descr = |{ gwa_item-status } - Ready to Save|.
+      WHEN gc_status-not_candidate.      gwa_item-status_descr = |{ gwa_item-status } - Not a Candidate|.
+      WHEN gc_status-error.              gwa_item-status_descr = |{ gwa_item-status } - Error|.
+      WHEN OTHERS.                       CLEAR gwa_item-status_descr.
+    ENDCASE.
 
-    CLEAR ls_scol.
-    ls_scol-fname     = 'CREDIT_AMOUNT'.
-    ls_scol-color-col = 6. " red
-    APPEND ls_scol TO lt_scol.
-
-    gwa_item-color_tab = lt_scol.
-    MODIFY git_item FROM gwa_item INDEX lv_tabix TRANSPORTING color_tab.
+    MODIFY git_item FROM gwa_item INDEX lv_tabix TRANSPORTING status_descr.
   ENDLOOP.
 
 ENDFORM.
@@ -1457,6 +1451,10 @@ FORM build_fieldcat USING pu_mode TYPE c.
   ls_fcat-icon      = abap_true.
   APPEND ls_fcat TO gt_fcat.
 
+  " STATUS_DESCR - "<code> - <description>", right next to the icon
+  " (see BUILD_STATUS_DESCR) so the user learns the numeric codes.
+  add_field 'STATUS_DESCR' 'Status'            28.
+
   " DOCNUM is clickable (hotspot) - opens J1BNFE. See LCL_ALV_EVENTS.
   CLEAR ls_fcat.
   ls_fcat-fieldname = 'DOCNUM'.
@@ -1487,11 +1485,6 @@ FORM build_fieldcat USING pu_mode TYPE c.
   add_field 'ICMS_RATE'   'ICMS Rate'          10.
   add_field 'ICMS_VAL'    'ICMS on NF'         18.
 
-  " Benefit % and ICMS Credit - font color set via COLOR_TAB
-  " (CTAB_FNAME, see BUILD_COLOR_TAB), NOT via EMPHASIZE here - the
-  " EMPHASIZE approach kept coloring the cell background regardless of
-  " the inverse flag, which is not what we want (background stays the
-  " normal zebra-striped row; only the text is red).
   CLEAR ls_fcat.
   ls_fcat-fieldname = 'BENEFIT_PERCENT'.
   ls_fcat-coltext   = 'Benefit %'.
@@ -1505,7 +1498,6 @@ FORM build_fieldcat USING pu_mode TYPE c.
   APPEND ls_fcat TO gt_fcat.
 
   add_field 'WAERS'       'Cur.'                5.
-  add_field 'STATUS'      'Status'             20.
 
   " EDOC_GUID is clickable (hotspot) - see LCL_ALV_EVENTS in the TOP
   " include, registered on the grid in each screen's PBO.

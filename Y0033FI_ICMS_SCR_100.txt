@@ -43,7 +43,7 @@ MODULE user_command_0100 INPUT.
         PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
         PERFORM build_status_icons.
-        PERFORM build_color_tab.
+        PERFORM build_status_descr.
         go_alv->refresh_table_display( ).
       ENDIF.
     WHEN 'APPROVE'.
@@ -53,7 +53,7 @@ MODULE user_command_0100 INPUT.
         PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
         PERFORM build_status_icons.
-        PERFORM build_color_tab.
+        PERFORM build_status_descr.
         go_alv->refresh_table_display( ).
       ENDIF.
     WHEN 'REQ_REV'.
@@ -63,7 +63,7 @@ MODULE user_command_0100 INPUT.
         PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
         PERFORM build_status_icons.
-        PERFORM build_color_tab.
+        PERFORM build_status_descr.
         go_alv->refresh_table_display( ).
       ENDIF.
     WHEN 'SEL_ALL'.
