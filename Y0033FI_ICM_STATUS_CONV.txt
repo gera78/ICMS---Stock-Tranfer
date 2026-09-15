@@ -1,0 +1,234 @@
+*&---------------------------------------------------------------------*
+*& Report  Y0033FI_ICM_STATUS_CONV
+*&---------------------------------------------------------------------*
+*& CR 16002 - One-time conversion: populates the new numeric
+*& STATUS_NUM field (domain Y0033FI_ICM_STATUS) on Y0033FI_ICM_ITEM,
+*& and STATUS_FROM_NUM/STATUS_TO_NUM on Y0033FI_ICM_LOG, from the
+*& existing text STATUS values - mapping is GC_STATUS -> GC_STATUS_NUM
+*& (Y0033FI_ICMS_TOP), so it can never drift from the constants used
+*& everywhere else.
+*&
+*& Prerequisites (must exist before this program can activate/run):
+*&   - Domain/data element Y0033FI_ICM_STATUS (SE11)
+*&   - Field STATUS_NUM on Y0033FI_ICM_ITEM
+*&   - Fields STATUS_FROM_NUM / STATUS_TO_NUM on Y0033FI_ICM_LOG
+*&
+*& Safety:
+*&   - Runs in TEST mode by default (P_TEST = 'X') - lists what would
+*&     change, no DB update.
+*&   - Per table, if ANY row has a STATUS value not found in the
+*&     mapping, nothing is committed for that table - the run is
+*&     all-or-nothing per table so the migration never goes half-done.
+*&     Fix the mapping (or the data) and rerun.
+*&   - Safe to rerun: rows already converted (STATUS_NUM/
+*&     STATUS_FROM_NUM/STATUS_TO_NUM filled) are left out of the
+*&     pending set.
+*&---------------------------------------------------------------------*
+REPORT y0033fi_icm_status_conv MESSAGE-ID y0033icms.
+
+INCLUDE y0033fi_icms_top.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
+PARAMETERS:
+  p_bukrs TYPE bukrs,                          " optional - blank = all company codes
+  p_test  TYPE char1 AS CHECKBOX DEFAULT 'X'.  " dry run (no DB update)
+SELECTION-SCREEN END OF BLOCK b1.
+
+TYPES:
+  BEGIN OF ty_map,
+    status_txt TYPE char20,
+    status_num TYPE y0033fi_icm_status,
+  END OF ty_map.
+
+DATA: git_map   TYPE STANDARD TABLE OF ty_map,
+      gv_errors TYPE i.
+
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_MAPPING
+*&---------------------------------------------------------------------*
+FORM build_mapping.
+  git_map = VALUE #(
+    ( status_txt = gc_status-candidate          status_num = gc_status_num-candidate )
+    ( status_txt = gc_status-approved           status_num = gc_status_num-approved )
+    ( status_txt = gc_status-posting            status_num = gc_status_num-posting )
+    ( status_txt = gc_status-posted             status_num = gc_status_num-posted )
+    ( status_txt = gc_status-cancel_detected    status_num = gc_status_num-cancel_detected )
+    ( status_txt = gc_status-reversal_requested status_num = gc_status_num-reversal_requested )
+    ( status_txt = gc_status-reversed           status_num = gc_status_num-reversed )
+    ( status_txt = gc_status-ready_to_save      status_num = gc_status_num-ready_to_save )
+    ( status_txt = gc_status-not_candidate      status_num = gc_status_num-not_candidate )
+    ( status_txt = gc_status-error              status_num = gc_status_num-error ) ).
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  MAP_STATUS
+*&---------------------------------------------------------------------*
+FORM map_status USING    pu_status_txt  TYPE char20
+                 CHANGING pc_status_num TYPE y0033fi_icm_status
+                          pc_found      TYPE abap_bool.
+  pc_found = abap_false.
+  READ TABLE git_map INTO DATA(ls_map) WITH KEY status_txt = pu_status_txt.
+  IF sy-subrc = 0.
+    pc_status_num = ls_map-status_num.
+    pc_found = abap_true.
+  ENDIF.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  CONVERT_ITEM  -  Y0033FI_ICM_ITEM: STATUS -> STATUS_NUM
+*&---------------------------------------------------------------------*
+FORM convert_item.
+  TYPES: BEGIN OF ty_item_upd,
+           docnum     TYPE j_1bnfdoc-docnum,
+           itmnum     TYPE j_1bnflin-itmnum,
+           seqnr      TYPE y0033fi_icm_seq,
+           status     TYPE char20,
+           status_num TYPE y0033fi_icm_status,
+         END OF ty_item_upd.
+  DATA: lt_item   TYPE STANDARD TABLE OF ty_item_upd,
+        lt_upd    TYPE STANDARD TABLE OF ty_item_upd,
+        lv_errors TYPE i.
+
+  SELECT docnum itmnum seqnr status status_num
+    FROM y0033fi_icm_item
+    INTO CORRESPONDING FIELDS OF TABLE @lt_item
+    WHERE status_num = @space
+      AND ( bukrs = @p_bukrs OR @p_bukrs IS INITIAL ).
+
+  WRITE: / |Y0033FI_ICM_ITEM: { lines( lt_item ) } row(s) pending conversion|.
+
+  LOOP AT lt_item INTO DATA(ls_item).
+    PERFORM map_status USING ls_item-status
+                     CHANGING ls_item-status_num DATA(lv_found).
+    IF lv_found = abap_true.
+      APPEND ls_item TO lt_upd.
+      WRITE: / |  OK     { ls_item-docnum } / { ls_item-itmnum } / { ls_item-seqnr }: |
+             && |{ ls_item-status } -> { ls_item-status_num }|.
+    ELSE.
+      lv_errors = lv_errors + 1.
+      WRITE: / |  ERROR  { ls_item-docnum } / { ls_item-itmnum } / { ls_item-seqnr }: |
+             && |unmapped status '{ ls_item-status }'|.
+    ENDIF.
+  ENDLOOP.
+
+  IF lv_errors > 0.
+    WRITE: / |Y0033FI_ICM_ITEM: { lv_errors } unmapped value(s) - aborting, nothing updated.|.
+    gv_errors = gv_errors + lv_errors.
+    RETURN.
+  ENDIF.
+
+  IF p_test = abap_true.
+    WRITE: / 'Y0033FI_ICM_ITEM: test mode - no update performed.'.
+    RETURN.
+  ENDIF.
+
+  LOOP AT lt_upd INTO DATA(ls_upd).
+    UPDATE y0033fi_icm_item SET status_num = @ls_upd-status_num
+      WHERE docnum = @ls_upd-docnum AND itmnum = @ls_upd-itmnum AND seqnr = @ls_upd-seqnr.
+  ENDLOOP.
+  COMMIT WORK AND WAIT.
+  WRITE: / |Y0033FI_ICM_ITEM: { lines( lt_upd ) } row(s) updated.|.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  CONVERT_LOG  -  Y0033FI_ICM_LOG: STATUS_FROM/TO -> _NUM
+*&---------------------------------------------------------------------*
+FORM convert_log.
+  TYPES: BEGIN OF ty_log_upd,
+           docnum          TYPE j_1bnfdoc-docnum,
+           itmnum          TYPE j_1bnflin-itmnum,
+           seqnr           TYPE y0033fi_icm_seq,
+           lognr           TYPE n LENGTH 6,
+           status_from     TYPE char20,
+           status_to       TYPE char20,
+           status_from_num TYPE y0033fi_icm_status,
+           status_to_num   TYPE y0033fi_icm_status,
+         END OF ty_log_upd.
+  DATA: lt_log    TYPE STANDARD TABLE OF ty_log_upd,
+        lt_upd    TYPE STANDARD TABLE OF ty_log_upd,
+        lv_errors TYPE i.
+
+  SELECT docnum itmnum seqnr lognr status_from status_to status_from_num status_to_num
+    FROM y0033fi_icm_log
+    INTO CORRESPONDING FIELDS OF TABLE @lt_log
+    WHERE status_from_num = @space
+       OR status_to_num   = @space.
+
+  WRITE: / |Y0033FI_ICM_LOG: { lines( lt_log ) } row(s) pending conversion|.
+
+  LOOP AT lt_log INTO DATA(ls_log).
+    DATA(lv_ok) = abap_true.
+
+* STATUS_FROM is legitimately blank on actions with no prior status
+* (e.g. CANDIDATE_SAVED) - leave STATUS_FROM_NUM blank too, don't
+* treat that as an unmapped value.
+    IF ls_log-status_from_num IS INITIAL AND ls_log-status_from IS NOT INITIAL.
+      PERFORM map_status USING ls_log-status_from
+                       CHANGING ls_log-status_from_num DATA(lv_found_from).
+      IF lv_found_from = abap_false.
+        lv_ok = abap_false.
+      ENDIF.
+    ENDIF.
+
+    IF ls_log-status_to_num IS INITIAL AND ls_log-status_to IS NOT INITIAL.
+      PERFORM map_status USING ls_log-status_to
+                       CHANGING ls_log-status_to_num DATA(lv_found_to).
+      IF lv_found_to = abap_false.
+        lv_ok = abap_false.
+      ENDIF.
+    ENDIF.
+
+    IF lv_ok = abap_true.
+      APPEND ls_log TO lt_upd.
+      WRITE: / |  OK     { ls_log-docnum } / { ls_log-itmnum } / { ls_log-seqnr } / { ls_log-lognr }: |
+             && |{ ls_log-status_from } -> { ls_log-status_to }|.
+    ELSE.
+      lv_errors = lv_errors + 1.
+      WRITE: / |  ERROR  { ls_log-docnum } / { ls_log-itmnum } / { ls_log-seqnr } / { ls_log-lognr }: |
+             && |unmapped status ('{ ls_log-status_from }' -> '{ ls_log-status_to }')|.
+    ENDIF.
+  ENDLOOP.
+
+  IF lv_errors > 0.
+    WRITE: / |Y0033FI_ICM_LOG: { lv_errors } unmapped value(s) - aborting, nothing updated.|.
+    gv_errors = gv_errors + lv_errors.
+    RETURN.
+  ENDIF.
+
+  IF p_test = abap_true.
+    WRITE: / 'Y0033FI_ICM_LOG: test mode - no update performed.'.
+    RETURN.
+  ENDIF.
+
+  LOOP AT lt_upd INTO DATA(ls_upd).
+    UPDATE y0033fi_icm_log SET status_from_num = @ls_upd-status_from_num,
+                                status_to_num   = @ls_upd-status_to_num
+      WHERE docnum = @ls_upd-docnum AND itmnum = @ls_upd-itmnum
+        AND seqnr = @ls_upd-seqnr AND lognr = @ls_upd-lognr.
+  ENDLOOP.
+  COMMIT WORK AND WAIT.
+  WRITE: / |Y0033FI_ICM_LOG: { lines( lt_upd ) } row(s) updated.|.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& Main processing
+*&---------------------------------------------------------------------*
+START-OF-SELECTION.
+  PERFORM build_mapping.
+
+  IF p_test = abap_true.
+    WRITE: / 'TEST MODE - no data will be changed.', /.
+  ELSE.
+    WRITE: / 'UPDATE MODE - changes will be committed.', /.
+  ENDIF.
+
+  PERFORM convert_item.
+  WRITE: /.
+  PERFORM convert_log.
+  WRITE: /.
+
+  IF gv_errors > 0.
+    WRITE: / |{ gv_errors } unmapped value(s) found overall - review above and fix before rerunning.|.
+  ELSE.
+    WRITE: / 'Done.'.
+  ENDIF.

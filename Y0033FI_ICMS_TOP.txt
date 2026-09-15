@@ -71,6 +71,30 @@ CONSTANTS:
     not_candidate      TYPE char20 VALUE 'NOT_CANDIDATE', " in-memory only, never persisted - item found and calculated fine, but has no ICMS value or no credit, so it's not a real candidate
   END OF gc_status.
 
+* Y0033FI_ICM_STATUS domain (SE11) - numeric replacement for GC_STATUS
+* above, introduced for the CR16002 status reorganization. Values
+* mirror GC_STATUS 1:1 during the migration window. GC_STATUS and the
+* STATUS field stay in place until every caller has moved to
+* GC_STATUS_NUM/STATUS_NUM and Y0033FI_ICM_STATUS_CONV has converted
+* all persisted rows - do not remove either side until then.
+* Gaps between values (multiples of 10) leave room to insert a new
+* status later without renumbering; 900+ is reserved for statuses
+* that are never persisted, and 990 for ERROR (can occur at any point
+* in the flow, not a step in it).
+CONSTANTS:
+  BEGIN OF gc_status_num,
+    candidate          TYPE y0033fi_icm_status VALUE '000',
+    approved           TYPE y0033fi_icm_status VALUE '010',
+    posting            TYPE y0033fi_icm_status VALUE '020',
+    posted             TYPE y0033fi_icm_status VALUE '030',
+    cancel_detected    TYPE y0033fi_icm_status VALUE '040',
+    reversal_requested TYPE y0033fi_icm_status VALUE '050',
+    reversed           TYPE y0033fi_icm_status VALUE '060',
+    ready_to_save      TYPE y0033fi_icm_status VALUE '900', " in-memory only, never persisted
+    not_candidate      TYPE y0033fi_icm_status VALUE '910', " in-memory only, never persisted
+    error              TYPE y0033fi_icm_status VALUE '990',
+  END OF gc_status_num.
+
 * LOG-ACTION domain
 CONSTANTS:
   BEGIN OF gc_action,
@@ -161,6 +185,7 @@ TYPES:
     credit_amount  TYPE j_1bnfstx-taxval,
     waers        TYPE waers,
     status       TYPE char20,
+    status_num   TYPE y0033fi_icm_status, " CR16002 status reorg - filled by Y0033FI_ICM_STATUS_CONV; replaces STATUS once cutover is complete
     cre_user     TYPE syuname,
     cre_date     TYPE dats,
     cre_time     TYPE tims,
