@@ -1,0 +1,97 @@
+*&---------------------------------------------------------------------*
+*& Report  Y0033FI_ICM_STATUS_FINALIZE
+*&---------------------------------------------------------------------*
+*& CR 16002 - Final step of the status migration. The old char20
+*& STATUS (Y0033FI_ICM_ITEM) and STATUS_FROM/STATUS_TO
+*& (Y0033FI_ICM_LOG) fields have been dropped and recreated as NUMC(3)
+*& (domain Y0033FI_ICM_STATUS_N) - same field names, new type. This
+*& program does the one remaining copy: the temporary STATUS_NUM /
+*& STATUS_FROM_NUM / STATUS_TO_NUM fields (already correct, after
+*& Y0033FI_ICM_STATUS_CONV + Y0033FI_ICM_STATUS_RENUM) into the
+*& freshly recreated STATUS / STATUS_FROM / STATUS_TO.
+*&
+*& No value mapping needed here - it's a straight column copy, unlike
+*& CONV (text->number) or RENUM (renumbering). 000 is never a real
+*& status (see GC_STATUS_NUM in Y0033FI_ICMS_TOP), so it safely marks
+*& "not yet copied" on the freshly (re)created fields, the same way it
+*& already does everywhere else in this migration.
+*&
+*& Prerequisite: STATUS_NUM/STATUS_FROM_NUM/STATUS_TO_NUM must still
+*& exist alongside the recreated STATUS/STATUS_FROM/STATUS_TO when
+*& this runs - do NOT drop them until after this program has run in
+*& update mode. Run Y0033FI_ICM_STATUS_DROP_OLD (or the equivalent
+*& manual SE11 field deletion) only afterward.
+*&
+*& Safety:
+*&   - Runs in TEST mode by default (P_TEST = 'X') - only counts what
+*&     would change, no DB update.
+*&   - Safe to rerun: rows where STATUS/STATUS_FROM/STATUS_TO are no
+*&     longer 000 are left alone.
+*&---------------------------------------------------------------------*
+REPORT y0033fi_icm_status_finalize MESSAGE-ID y0033icms.
+
+INCLUDE y0033fi_icms_top.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
+PARAMETERS:
+  p_test TYPE char1 AS CHECKBOX DEFAULT 'X'.  " dry run (no DB update)
+SELECTION-SCREEN END OF BLOCK b1.
+
+*&---------------------------------------------------------------------*
+*&      Form  FINALIZE_ITEM
+*&---------------------------------------------------------------------*
+FORM finalize_item.
+  SELECT COUNT(*) FROM y0033fi_icm_item
+    INTO @DATA(lv_count)
+    WHERE status = '000'.
+
+  WRITE: / |Y0033FI_ICM_ITEM: { lv_count } row(s) pending (STATUS still 000 - not yet copied from STATUS_NUM)|.
+
+  IF p_test = abap_true.
+    WRITE: / 'Y0033FI_ICM_ITEM: test mode - no update performed.'.
+    RETURN.
+  ENDIF.
+
+  UPDATE y0033fi_icm_item SET status = status_num
+    WHERE status = '000'.
+  COMMIT WORK AND WAIT.
+  WRITE: / |Y0033FI_ICM_ITEM: { lv_count } row(s) updated.|.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  FINALIZE_LOG
+*&---------------------------------------------------------------------*
+FORM finalize_log.
+  SELECT COUNT(*) FROM y0033fi_icm_log
+    INTO @DATA(lv_count)
+    WHERE status_from = '000' OR status_to = '000'.
+
+  WRITE: / |Y0033FI_ICM_LOG: { lv_count } row(s) pending (STATUS_FROM/STATUS_TO still 000)|.
+
+  IF p_test = abap_true.
+    WRITE: / 'Y0033FI_ICM_LOG: test mode - no update performed.'.
+    RETURN.
+  ENDIF.
+
+  UPDATE y0033fi_icm_log SET status_from = status_from_num,
+                              status_to   = status_to_num
+    WHERE status_from = '000' OR status_to = '000'.
+  COMMIT WORK AND WAIT.
+  WRITE: / |Y0033FI_ICM_LOG: { lv_count } row(s) updated.|.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& Main processing
+*&---------------------------------------------------------------------*
+START-OF-SELECTION.
+  IF p_test = abap_true.
+    WRITE: / 'TEST MODE - no data will be changed.', /.
+  ELSE.
+    WRITE: / 'UPDATE MODE - changes will be committed.', /.
+  ENDIF.
+
+  PERFORM finalize_item.
+  WRITE: /.
+  PERFORM finalize_log.
+  WRITE: /.
+  WRITE: / 'Done. Once verified, drop STATUS_NUM/STATUS_FROM_NUM/STATUS_TO_NUM in SE11.'.
