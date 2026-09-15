@@ -30,7 +30,7 @@ FORM post_released_items.
 
   SELECT * FROM y0033fi_icm_item
     INTO TABLE @DATA(lt_approved)
-    WHERE status = @gc_status-approved.
+    WHERE status_num = @gc_status_num-approved.
 
   IF lt_approved IS INITIAL.
     MESSAGE e007(y0033icms).
@@ -145,7 +145,8 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       lv_locked = abap_false.
       EXIT.
     ENDIF.
-    UPDATE y0033fi_icm_item SET status = @gc_status-posting
+    UPDATE y0033fi_icm_item SET status     = @gc_status-posting,
+                                status_num = @gc_status_num-posting
       WHERE docnum = @ls_it-docnum AND itmnum = @ls_it-itmnum AND seqnr = @ls_it-seqnr.
   ENDLOOP.
 
@@ -286,7 +287,8 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
     " STATUS_TO, since it's supplementary detail about the SAME
     " failure, not a separate transition.
     LOOP AT pu_chunk INTO ls_it.
-      UPDATE y0033fi_icm_item SET status = @gc_status-approved,
+      UPDATE y0033fi_icm_item SET status     = @gc_status-approved,
+                                  status_num = @gc_status_num-approved,
                                   msg    = @ls_err-message
         WHERE docnum = @ls_it-docnum AND itmnum = @ls_it-itmnum AND seqnr = @ls_it-seqnr.
       PERFORM write_log USING ls_it gc_action-error gc_status-posting gc_status-approved
@@ -350,6 +352,7 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
                                                 itmnum = ls_it-itmnum
                                                 seqnr  = ls_it-seqnr.
     UPDATE y0033fi_icm_item SET status   = @gc_status-posted,
+                                status_num = @gc_status_num-posted,
                                 belnr_fi = @lv_belnr,
                                 gjahr_fi = @lv_gjahr,
                                 buzei_fi = @ls_buzei-buzei,
@@ -397,7 +400,7 @@ FORM execute_reversal.
 
   SELECT * FROM y0033fi_icm_item
     INTO TABLE @DATA(lt_strq)
-    WHERE status = @gc_status-reversal_requested.
+    WHERE status_num = @gc_status_num-reversal_requested.
 
   IF lt_strq IS INITIAL.
     MESSAGE e008(y0033icms).
@@ -423,7 +426,7 @@ FORM execute_reversal.
       INTO TABLE @lt_keep
       WHERE belnr_fi = @ls_any-belnr_fi
         AND gjahr_fi = @ls_any-gjahr_fi
-        AND status   = @gc_status-posted.
+        AND status_num = @gc_status_num-posted.
 
     " OBJ_SYS must be the full logical system name (e.g. QP2CLNT600),
     " confirmed against a real document header - SY-SYSID alone only
@@ -494,7 +497,8 @@ FORM execute_reversal.
       ENDIF.
       PERFORM smart_case CHANGING ls_rev_err-message.
       LOOP AT lt_req INTO DATA(ls_req).
-        UPDATE y0033fi_icm_item SET status = @gc_status-posted,
+        UPDATE y0033fi_icm_item SET status     = @gc_status-posted,
+                                    status_num = @gc_status_num-posted,
                                     msg    = @ls_rev_err-message
           WHERE docnum = @ls_req-docnum AND itmnum = @ls_req-itmnum AND seqnr = @ls_req-seqnr.
         PERFORM write_log USING ls_req gc_action-error gc_status-reversal_requested gc_status-posted
@@ -524,6 +528,7 @@ FORM execute_reversal.
 
     LOOP AT lt_req INTO ls_req.
       UPDATE y0033fi_icm_item SET status          = @gc_status-reversed,
+                                  status_num          = @gc_status_num-reversed,
                                   reversal_exec_user  = @sy-uname,
                                   reversal_exec_date  = @sy-datum,
                                   reversal_exec_time  = @sy-uzeit,
@@ -543,7 +548,8 @@ FORM execute_reversal.
     " reversed document, so they keep their benefit posted.
     IF lt_keep IS NOT INITIAL.
       LOOP AT lt_keep INTO DATA(ls_keep_it).
-        UPDATE y0033fi_icm_item SET status = @gc_status-approved,
+        UPDATE y0033fi_icm_item SET status     = @gc_status-approved,
+                                    status_num = @gc_status_num-approved,
                                     belnr_fi = @space,
                                     gjahr_fi = @space,
                                     buzei_fi = 0
