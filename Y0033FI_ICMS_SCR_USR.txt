@@ -24,7 +24,7 @@ SELECT-OPTIONS:
   s_docnum FOR j_1bnfdoc-docnum,                " internal nota fiscal document number
   s_series FOR j_1bnfdoc-series,                " NFe series
   s_docdat FOR j_1bnfdoc-docdat MODIF ID fs,    " nota fiscal creation date - search mode only (view mode already filters this via S_DATUM, see REFRESH_FROM_DB)
-  s_acckey FOR edobrincoming-accesskey,         " NF-e access key (44 digits)
+  s_acckey FOR gwa_item-accesskey,              " NF-e access key (44 digits) - typed against GWA_ITEM-ACCESSKEY (CHAR44), not the source table directly: EDOBRINCOMING-ACCESSKEY is TYPE STRING, which selection-screen fields can't use
 * S_LCTO only applies in view mode - nothing is posted yet in search
 * mode, so it is hidden there (same MODIF ID FV as the status filter).
   s_lcto   FOR sy-datum MODIF ID fv.
