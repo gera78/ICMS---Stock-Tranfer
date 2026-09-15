@@ -124,7 +124,7 @@ INITIALIZATION.
 
 * Filter checkbox icons + "<code> - <description>" labels - same
 * icons/codes as BUILD_STATUS_ICONS/BUILD_STATUS_DESCR (Y0033FI_ICMS_F01).
-  c_sre_ic = icon_led_inactive.     c_sre_tx = '900 - Ready to Save'.
+  c_sre_ic = icon_information.      c_sre_tx = '900 - Ready to Save'.
   c_snc_ic = icon_led_inactive.     c_snc_tx = '910 - Not a Candidate'.
   c_ser_ic = icon_message_error.    c_ser_tx = '990 - Error'.
 
