@@ -562,14 +562,14 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
     " that already passed the lane match, so this stays a cheap
     " SELECT SINGLE, not a bulk concern like SELECT_CANDIDATE_DOCUMENTS.
     " T001W has no BUKRS field at all (plant-to-company-code linkage
-    " is indirect, via T001K/T001) - J_1BBRANC alone is the lookup key
+    " is indirect, via T001K/T001) - J_1BBRANCH alone is the lookup key
     " here, since Business Place codes are unique per plant regardless
     " of company code.
     DATA lv_werks_dest TYPE werks_d.
     CLEAR lv_werks_dest.
     SELECT SINGLE werks FROM t001w
       INTO @lv_werks_dest
-      WHERE j_1bbranc = @lv_dest_branch.
+      WHERE j_1bbranch = @lv_dest_branch.
 
     CLEAR gwa_item.
     gwa_item-docnum      = ls_nfdoc-docnum.
