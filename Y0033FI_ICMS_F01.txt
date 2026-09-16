@@ -238,14 +238,14 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     FROM edobrincoming
     INTO TABLE @DATA(lt_inc)
     FOR ALL ENTRIES IN @lt_edoc
-    WHERE edoc_guid    = @lt_edoc-edoc_guid
-      AND accesskey    IN @s_acckey
-      AND company_code = @pu_bukrs.
-  " COMPANY_CODE filter added so a search only tracks (Y0033FI_ICM_EDOC)
-  " eDocuments belonging to the company being searched - EDOCUMENT above
-  " has no BUKRS field, so without this every run would otherwise walk
-  " every company's eDocuments in the date range and write a row for
-  " each one, not just the ones relevant to PU_BUKRS.
+    WHERE edoc_guid = @lt_edoc-edoc_guid
+      AND accesskey IN @s_acckey.
+  " NOTE: do NOT filter this SELECT by EDOBRINCOMING-COMPANY_CODE = PU_BUKRS -
+  " tried once, broke every candidate (that field doesn't reliably match
+  " PU_BUKRS/BUKRS for legitimate rows). The real company scoping already
+  " happens below, on the J_1BNFDOC read (WHERE BUKRS = PU_BUKRS) - a GUID
+  " belonging to another company simply won't resolve a DOCNUM there and
+  " ends up as LINK_ERROR, same as any other unresolved GUID.
 
   LOOP AT lt_edoc INTO DATA(ls_edoc).
 
