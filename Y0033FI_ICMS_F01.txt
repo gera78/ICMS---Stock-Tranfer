@@ -1305,11 +1305,18 @@ FORM save_candidates USING pu_id_exec TYPE char20.
     " session saving the same item between search and this click
     " (FILTER_ACTIVE_CYCLE already removes items with an active cycle
     " from the search results, but that check ran moments earlier).
+    " REVERSED and REJECTED are both "closed" outcomes - same reasoning
+    " as FILTER_ACTIVE_CYCLE, which already let this item back into the
+    " search results; this second check (done right before INSERT, to
+    " catch a race since FILTER_ACTIVE_CYCLE ran moments earlier) must
+    " agree with it, or a REJECTED item would pass the first check but
+    " still get silently skipped here.
     SELECT COUNT(*) FROM y0033fi_icm_item
       INTO @DATA(lv_active_count)
       WHERE docnum = @ls_sel-docnum
         AND itmnum = @ls_sel-itmnum
-        AND status <> @gc_status-reversed.
+        AND status <> @gc_status-reversed
+        AND status <> @gc_status-rejected.
     IF lv_active_count > 0.
       lv_skip = lv_skip + 1.
       PERFORM dequeue_item USING ls_sel-docnum ls_sel-itmnum 0.
