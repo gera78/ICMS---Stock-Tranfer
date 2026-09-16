@@ -478,18 +478,22 @@ ENDFORM.
 * Y0033FI_ICM_EDOC same as any other GUID, purely as a "confirmed
 * arrival" record; it never gates this candidate.
 *
-* "This flow" = J_1BNFDOC-PARVW = 'BR': the nota's partner is one of
-* OUR OWN business places (a branch), not a real third-party vendor -
-* confirmed against a real document pair (BUKRS 0033/BRANCH 0006,
-* PARVW 'BR', PARID '330005' pointing at branch 0005, same CNPJ root
-* 46.389.383 on both CGC and CNPJ_BUPLA, just a different branch suffix).
+* "This flow" = J_1BNFDOC-BRANCH = GC_TRANSFER_BRANCH (a fixed, known
+* origin branch - Y0033FI_ICMS_TOP) AND at least one J_1BNFLIN item at
+* GC_TRANSFER_CFOP. Both hardcoded for now, pending approval - see the
+* constants' own comments; if approved, move them into a maintainable
+* config field instead. PARVW = 'BR' was tried first (the nota's
+* partner being one of our own business places) but was dropped in
+* favor of this simpler, explicit BRANCH+CFOP check.
 *
-* PARID encodes the destination branch for PARVW = 'BR' partners as
-* BUKRS (no leading zeros) + BRANCH. Taking the LAST 4 characters
-* recovers BRANCH regardless of how many digits BUKRS occupies - this
-* was derived from a single sample document, so confirm it still holds
-* for a company code whose BUKRS isn't "0033" before relying on it for
-* real postings.
+* PARID still encodes the destination branch, as BUKRS (no leading
+* zeros) + BRANCH - confirmed against a real document pair (BUKRS
+* 0033/BRANCH 0006, PARID '330005' pointing at branch 0005, same CNPJ
+* root 46.389.383 on both CGC and CNPJ_BUPLA, just a different branch
+* suffix). Taking the LAST 4 characters recovers BRANCH regardless of
+* how many digits BUKRS occupies - this was derived from a single
+* sample document, so confirm it still holds for a company code whose
+* BUKRS isn't "0033" before relying on it for real postings.
 *
 * MATCH_LANE itself is untouched - its 7 generic key fields are reused
 * with a different meaning for this flow (lane maintenance for these
@@ -515,11 +519,32 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
     INTO TABLE @DATA(lt_transfer)
     WHERE bukrs  = @pu_bukrs
       AND direct = '2'
-      AND parvw  = 'BR'
+      AND branch = @gc_transfer_branch
       AND nfenum IN @lt_nfenum
       AND docnum IN @s_docnum
       AND series IN @s_series
       AND docdat IN @s_docdat.
+
+  CHECK lt_transfer IS NOT INITIAL.
+
+  " Only notas with at least one line item at the configured CFOP
+  " belong to this flow - see GC_TRANSFER_CFOP (Y0033FI_ICMS_TOP) for
+  " why this is hardcoded for now.
+  DATA lt_cfop_docnum TYPE STANDARD TABLE OF j_1bnflin-docnum WITH DEFAULT KEY.
+  SELECT DISTINCT docnum FROM j_1bnflin
+    INTO TABLE @lt_cfop_docnum
+    FOR ALL ENTRIES IN @lt_transfer
+    WHERE docnum = @lt_transfer-docnum
+      AND cfop   = @gc_transfer_cfop.
+  SORT lt_cfop_docnum BY table_line.
+
+  LOOP AT lt_transfer INTO DATA(ls_cfop_check).
+    READ TABLE lt_cfop_docnum WITH KEY table_line = ls_cfop_check-docnum
+      TRANSPORTING NO FIELDS BINARY SEARCH.
+    IF sy-subrc <> 0.
+      DELETE lt_transfer.
+    ENDIF.
+  ENDLOOP.
 
   CHECK lt_transfer IS NOT INITIAL.
 
@@ -530,7 +555,7 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
   LOOP AT lt_transfer INTO DATA(ls_nfdoc).
 
     " Destination branch = last 4 characters of PARID (see the header
-    " comment on the BUKRS+BRANCH convention for PARVW = 'BR').
+    " comment on the BUKRS+BRANCH convention).
     DATA lv_off TYPE i.
     lv_off = strlen( ls_nfdoc-parid ) - 4.
     DATA(lv_dest_branch) = ls_nfdoc-parid+lv_off(4).
