@@ -39,6 +39,12 @@ MODULE user_command_0200 INPUT.
       PERFORM check_nf_cancellation.
       LEAVE TO SCREEN 0.
     WHEN 'EXEC_REV'.
+      " A reversal always undoes the WHOLE original accounting
+      " document - selecting only some of a nota's REVERSAL_REQUESTED
+      " items would strand the rest at that status after the others
+      " are reversed, so make sure the whole nota is selected first
+      " (same prompt used on screen 100 - see ENSURE_FULL_DOCNUM_SELECTION).
+      PERFORM ensure_full_docnum_selection.
       PERFORM execute_reversal.
       LEAVE TO SCREEN 0.
     WHEN 'LANE'.

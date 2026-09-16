@@ -1697,6 +1697,24 @@ FORM check_nf_cancellation.
     INTO TABLE @DATA(lt_posted)
     WHERE status = @gc_status-posted.
 
+  " Online (screen 200 "Check Cancellations" button): only check what
+  " the admin actually marked with SEL - same reasoning as
+  " POST_RELEASED_ITEMS/EXECUTE_REVERSAL (Y0033FI_ICMS_F02). The
+  " background job has no GIT_ITEM/screen at all and must keep
+  " checking every POSTED item regardless, so this only applies
+  " interactively.
+  IF sy-batch = abap_false.
+    LOOP AT lt_posted INTO DATA(ls_check).
+      READ TABLE git_item WITH KEY docnum = ls_check-docnum
+                                    itmnum = ls_check-itmnum
+                                    seqnr  = ls_check-seqnr
+        INTO DATA(ls_git_check).
+      IF sy-subrc <> 0 OR ls_git_check-sel <> abap_true.
+        DELETE lt_posted.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
   DATA lv_flagged TYPE i.
 
   LOOP AT lt_posted INTO DATA(ls_posted).
