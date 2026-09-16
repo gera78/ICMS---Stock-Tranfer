@@ -358,8 +358,14 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     WHERE edoc_guid = @lt_edoc-edoc_guid.
   SORT lt_edoc_known BY table_line.
 
+  " Declared explicitly (not inline @DATA(...)) so it comes out WITH
+  " DEFAULT KEY, matching MATCH_LANE's PU_LT_LANE parameter type
+  " (TY_IT_LANE) - an inline SELECT ... INTO TABLE @DATA(...) always
+  " creates a WITH EMPTY KEY table instead, which PERFORM rejects as
+  " an incompatible type even though the row type is identical.
+  DATA lt_lane_all TYPE ty_it_lane.
   SELECT * FROM y0033fi_icm_lane
-    INTO TABLE @DATA(lt_lane_all).
+    INTO TABLE @lt_lane_all.
 
   DATA lt_candidates LIKE lt_all_nfdoc.
 
