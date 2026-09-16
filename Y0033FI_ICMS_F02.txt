@@ -560,8 +560,13 @@ FORM execute_reversal.
                                   reversal_exec_date  = @sy-datum,
                                   reversal_exec_time  = @sy-uzeit,
                                   reversal_belnr      = @lv_reversal_belnr,
-                                  reversal_gjahr      = @ls_any-gjahr_fi
+                                  reversal_gjahr      = @ls_any-gjahr_fi,
+                                  msg                 = @space
         WHERE docnum = @ls_req-docnum AND itmnum = @ls_req-itmnum AND seqnr = @ls_req-seqnr.
+      " Same reasoning as POST_ONE_DOCUMENT: clears any MSG left over
+      " from an earlier failed reversal attempt on this same item - now
+      " that this cycle succeeded, it shouldn't still look like it has
+      " a pending error. Full history stays in Y0033FI_ICM_LOG.
 
       ls_req-reversal_belnr = lv_reversal_belnr.
       DATA lv_msg_reversed TYPE char200.
