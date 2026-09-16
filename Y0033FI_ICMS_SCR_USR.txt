@@ -199,3 +199,16 @@ AT SELECTION-SCREEN.
       p_vrj = p_mvg2.  p_vap = p_mvg2.  p_vpf = p_mvg2.  p_vpg = p_mvg2.
       p_vrr = p_mvg2.  p_vrv = p_mvg2.  p_ver = p_mvg2.
   ENDCASE.
+
+* Keep the master checkboxes honest: recompute them from their actual
+* children on EVERY round trip (not just when the master itself was
+* clicked) - otherwise switching between Search/View (or any other
+* trip to the server, e.g. pressing Execute) kept showing whichever
+* value the master had last, even after a child was unchecked
+* individually, instead of tracking its children's real combined state.
+  p_mvg1 = COND #( WHEN p_vca = abap_true AND p_vpo = abap_true AND p_vcd = abap_true
+                    THEN abap_true ELSE abap_false ).
+  p_mvg2 = COND #( WHEN p_vrj = abap_true AND p_vap = abap_true AND p_vpf = abap_true
+                         AND p_vpg = abap_true AND p_vrr = abap_true AND p_vrv = abap_true
+                         AND p_ver = abap_true
+                    THEN abap_true ELSE abap_false ).

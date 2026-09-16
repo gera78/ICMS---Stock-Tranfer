@@ -232,3 +232,23 @@ AT SELECTION-SCREEN.
       p_vca = p_mag2.  p_vrj = p_mag2.  p_vpg = p_mag2.  p_vcd = p_mag2.
       p_vrv = p_mag2.  p_ver = p_mag2.
   ENDCASE.
+
+* Keep all four master checkboxes honest: recompute each from its
+* actual children on EVERY round trip (not just when the master
+* itself was clicked) - otherwise switching between Search/View/Admin
+* (or any other trip to the server, e.g. pressing Execute) kept
+* showing whichever value the master had last, even after a child was
+* unchecked individually, instead of tracking its children's real
+* combined state.
+  p_mvg1 = COND #( WHEN p_vca = abap_true AND p_vpo = abap_true AND p_vcd = abap_true
+                    THEN abap_true ELSE abap_false ).
+  p_mvg2 = COND #( WHEN p_vrj = abap_true AND p_vap = abap_true AND p_vpf = abap_true
+                         AND p_vpg = abap_true AND p_vrr = abap_true AND p_vrv = abap_true
+                         AND p_ver = abap_true
+                    THEN abap_true ELSE abap_false ).
+  p_mag1 = COND #( WHEN p_vap = abap_true AND p_vpf = abap_true AND p_vpo = abap_true
+                         AND p_vrr = abap_true
+                    THEN abap_true ELSE abap_false ).
+  p_mag2 = COND #( WHEN p_vca = abap_true AND p_vrj = abap_true AND p_vpg = abap_true
+                         AND p_vcd = abap_true AND p_vrv = abap_true AND p_ver = abap_true
+                    THEN abap_true ELSE abap_false ).
