@@ -1867,6 +1867,53 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
                                ( sign = 'I' option = 'EQ' low = ls_guid ) ).
   ENDIF.
 
+  " Action Date filter (S_ACTDAT + P_ASAV/P_AAPR/P_AREJ/P_APST) - lets
+  " the user find items by when a lifecycle transition actually
+  " happened, from Y0033FI_ICM_LOG, instead of relying on ITEM-level
+  " date fields that either don't exist (REJECTED) or aren't reliable
+  " for this purpose (BUDAT_FI can be backdated, or forced to today by
+  " the period-closed retry in POST_RELEASED_ITEMS). Same "resolve to a
+  " key list first" pattern as S_ACCKEY above: an empty S_ACTDAT range
+  " imposes no restriction; a non-empty one that matches zero LOG rows
+  " (or has every checkbox unchecked) must return zero items.
+  TYPES: BEGIN OF ty_log_key,
+           docnum TYPE y0033fi_icm_log-docnum,
+           itmnum TYPE y0033fi_icm_log-itmnum,
+           seqnr  TYPE y0033fi_icm_log-seqnr,
+         END OF ty_log_key.
+  DATA lt_log_keys TYPE STANDARD TABLE OF ty_log_key WITH DEFAULT KEY.
+  DATA lv_actdat_filter TYPE abap_bool VALUE abap_false.
+  IF s_actdat[] IS NOT INITIAL.
+    lv_actdat_filter = abap_true.
+    DATA lr_action TYPE RANGE OF y0033fi_icm_log-action.
+    IF p_asav = abap_true.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_action-candidate_saved ) TO lr_action.
+    ENDIF.
+    IF p_aapr = abap_true.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_action-approved ) TO lr_action.
+    ENDIF.
+    IF p_arej = abap_true.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_action-candidate_rejected ) TO lr_action.
+    ENDIF.
+    IF p_apst = abap_true.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_action-posted ) TO lr_action.
+    ENDIF.
+    IF lr_action IS INITIAL.
+      CLEAR git_item.
+      RETURN.
+    ENDIF.
+    SELECT docnum, itmnum, seqnr FROM y0033fi_icm_log
+      INTO TABLE @lt_log_keys
+      WHERE act_date IN @s_actdat
+        AND action   IN @lr_action.
+    IF lt_log_keys IS INITIAL.
+      CLEAR git_item.
+      RETURN.
+    ENDIF.
+    SORT lt_log_keys BY docnum itmnum seqnr.
+    DELETE ADJACENT DUPLICATES FROM lt_log_keys COMPARING docnum itmnum seqnr.
+  ENDIF.
+
   SELECT * FROM y0033fi_icm_item
     INTO TABLE @lt_db
     WHERE bukrs      = @pu_bukrs
@@ -1887,6 +1934,18 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
   " small type/length differences between the DB structure and GWA_ITEM
   " (e.g. NFENUM) that "INTO CORRESPONDING FIELDS OF TABLE" rejected at
   " compile time.
+
+  IF lv_actdat_filter = abap_true.
+    LOOP AT git_item INTO gwa_item.
+      READ TABLE lt_log_keys TRANSPORTING NO FIELDS BINARY SEARCH
+        WITH KEY docnum = gwa_item-docnum
+                 itmnum = gwa_item-itmnum
+                 seqnr  = gwa_item-seqnr.
+      IF sy-subrc <> 0.
+        DELETE git_item.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
 
   LOOP AT git_item INTO gwa_item.
     DATA(lv_tabix) = sy-tabix.

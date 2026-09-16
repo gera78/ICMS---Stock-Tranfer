@@ -29,6 +29,20 @@ SELECT-OPTIONS:
 * S_LCTO only applies in view/admin-review mode - nothing is posted
 * yet in search mode, so it is hidden there.
   s_lcto   FOR sy-datum MODIF ID fv.
+* Action Date - view/admin-review mode only (same MODIF ID FV).
+* Distinct from S_DATUM (eDocument creation date) and S_LCTO (BUDAT_FI,
+* the posting accounting date, which is not reliable for "posted on
+* date X": it can be backdated and gets forced to today by the
+* period-closed retry in POST_RELEASED_ITEMS). Filters by when a
+* lifecycle transition actually happened, per Y0033FI_ICM_LOG-ACT_DATE
+* - the only place REJECTED has a date at all, since Y0033FI_ICM_ITEM
+* has no field for it.
+  s_actdat FOR sy-datum MODIF ID fv.
+PARAMETERS:
+  p_asav TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv, " Action: Candidate Saved
+  p_aapr TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv, " Action: Approved
+  p_arej TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv, " Action: Rejected
+  p_apst TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv. " Action: Posted
 SELECTION-SCREEN END OF BLOCK b1.
 
 SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-b02.
