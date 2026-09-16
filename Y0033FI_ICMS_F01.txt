@@ -466,6 +466,132 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  SELECT_CANDIDATE_DOCUMENTS_TRANSFER
+*&---------------------------------------------------------------------*
+* Second, independent candidate source, for the intercompany stock
+* transfer flow: J_1BNFDOC itself (DIRECT = '2', emitted at the ORIGIN
+* branch) is the fato gerador here - the ICMS benefit gets calculated
+* right away, without waiting for the destination branch to download
+* the NF-e and create an eDocument. EDOCUMENT/EDOBRINCOMING never come
+* into this path at all - if/when the eDocument for this same NFe
+* later shows up at the destination, SYNC_EDOC_TRACKING links it into
+* Y0033FI_ICM_EDOC same as any other GUID, purely as a "confirmed
+* arrival" record; it never gates this candidate.
+*
+* "This flow" = J_1BNFDOC-PARVW = 'BR': the nota's partner is one of
+* OUR OWN business places (a branch), not a real third-party vendor -
+* confirmed against a real document pair (BUKRS 0033/BRANCH 0006,
+* PARVW 'BR', PARID '330005' pointing at branch 0005, same CNPJ root
+* 46.389.383 on both CGC and CNPJ_BUPLA, just a different branch suffix).
+*
+* PARID encodes the destination branch for PARVW = 'BR' partners as
+* BUKRS (no leading zeros) + BRANCH. Taking the LAST 4 characters
+* recovers BRANCH regardless of how many digits BUKRS occupies - this
+* was derived from a single sample document, so confirm it still holds
+* for a company code whose BUKRS isn't "0033" before relying on it for
+* real postings.
+*
+* MATCH_LANE itself is untouched - its 7 generic key fields are reused
+* with a different meaning for this flow (lane maintenance for these
+* rows keys on branch, not a real vendor):
+*   VENDOR_CODE   = origin branch (this doc's own BRANCH)
+*   VENDOR_TAX_ID = origin CNPJ (CNPJ_BUPLA)
+*   VENDOR_REGION = blank - not on the header for the origin side;
+*                   VENDOR_CODE above is already an exact, unambiguous
+*                   key on its own
+*   PLANT_CODE    = destination branch (from PARID) - not a real plant
+*                   (WERKS) yet, see the T001W lookup below
+*   PLANT_REGION  = destination region - already on the header
+*                   (J_1BNFDOC-REGIO is the BR partner's own region)
+*---------------------------------------------------------------------*
+FORM select_candidate_documents_transfer USING pu_bukrs TYPE bukrs.
+
+  DATA(lt_nfenum) = s_nfenum[].
+  PERFORM pad_nfenum_range CHANGING lt_nfenum.
+
+  SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel,
+         parid, regio, cnpj_bupla
+    FROM j_1bnfdoc
+    INTO TABLE @DATA(lt_transfer)
+    WHERE bukrs  = @pu_bukrs
+      AND direct = '2'
+      AND parvw  = 'BR'
+      AND nfenum IN @lt_nfenum
+      AND docnum IN @s_docnum
+      AND series IN @s_series
+      AND docdat IN @s_docdat.
+
+  CHECK lt_transfer IS NOT INITIAL.
+
+  DATA lt_lane_all TYPE ty_it_lane.
+  SELECT * FROM y0033fi_icm_lane
+    INTO TABLE @lt_lane_all.
+
+  LOOP AT lt_transfer INTO DATA(ls_nfdoc).
+
+    " Destination branch = last 4 characters of PARID (see the header
+    " comment on the BUKRS+BRANCH convention for PARVW = 'BR').
+    DATA lv_off TYPE i.
+    lv_off = strlen( ls_nfdoc-parid ) - 4.
+    DATA(lv_dest_branch) = ls_nfdoc-parid+lv_off(4).
+
+    DATA(ls_lane_key) = VALUE ty_lane_key(
+      bukrs         = ls_nfdoc-bukrs
+      vendor_code   = ls_nfdoc-branch
+      vendor_tax_id = ls_nfdoc-cnpj_bupla
+      vendor_region = space
+      country       = ls_nfdoc-land1
+      plant_code    = lv_dest_branch
+      plant_region  = ls_nfdoc-regio ).
+
+    DATA lv_origin TYPE t005u-bland.
+    DATA lv_dest   TYPE t005u-bland.
+    DATA lv_level  TYPE n LENGTH 1.
+    DATA lv_lane_subrc TYPE sy-subrc.
+    PERFORM match_lane USING ls_lane_key lt_lane_all
+                     CHANGING lv_origin lv_dest lv_level lv_lane_subrc.
+
+    IF lv_lane_subrc <> 0.
+      CONTINUE. " not in scope (no lane matched), or configuration error (ambiguous lanes)
+    ENDIF.
+
+    " Real plant (WERKS), needed only for the eventual FI posting
+    " (Y0033FI_ICMS_F02 - POST_RELEASED_ITEMS sets the GL line's plant
+    " from WERKS_DEST) - not needed for the lane match above, which
+    " works off branch codes directly. Looked up only for candidates
+    " that already passed the lane match, so this stays a cheap
+    " SELECT SINGLE, not a bulk concern like SELECT_CANDIDATE_DOCUMENTS.
+    DATA lv_werks_dest TYPE werks_d.
+    CLEAR lv_werks_dest.
+    SELECT SINGLE werks FROM t001w
+      INTO @lv_werks_dest
+      WHERE bukrs     = @pu_bukrs
+        AND j_1bbranc = @lv_dest_branch.
+
+    CLEAR gwa_item.
+    gwa_item-docnum      = ls_nfdoc-docnum.
+    gwa_item-nfenum      = ls_nfdoc-nfenum.
+    gwa_item-series      = ls_nfdoc-series.
+    gwa_item-bukrs       = ls_nfdoc-bukrs.
+    gwa_item-branch      = ls_nfdoc-branch.
+    gwa_item-land1       = ls_nfdoc-land1.
+    gwa_item-docdat      = ls_nfdoc-docdat.
+    gwa_item-cancel      = ls_nfdoc-cancel.
+    gwa_item-regio_orig  = lv_origin.
+    gwa_item-regio_dest  = lv_dest.
+    gwa_item-lane_match_level = lv_level.
+    gwa_item-werks_dest  = lv_werks_dest.
+    " EDOC_GUID/MATERIALDOC(_YEAR) stay blank - no eDocument involved
+    " at this point; SYNC_EDOC_TRACKING fills EDOC_GUID in later if and
+    " when one shows up for this same NFe at the destination.
+
+    APPEND gwa_item TO git_item.
+
+  ENDLOOP.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  UPSERT_EDOC_LINK_ERROR
 *&---------------------------------------------------------------------*
 * Records a GUID that failed to resolve to exactly one DOCNUM.

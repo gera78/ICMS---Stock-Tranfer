@@ -79,6 +79,7 @@ START-OF-SELECTION.
     " cockpit's own equivalent safety net.
     PERFORM check_search_filters.
     PERFORM select_candidate_documents USING p_bukrs.
+    PERFORM select_candidate_documents_transfer USING p_bukrs.
     PERFORM read_items_and_icms.
     PERFORM determine_benefit_percentage.
     PERFORM filter_active_cycle.
