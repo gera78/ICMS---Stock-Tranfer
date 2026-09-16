@@ -89,7 +89,7 @@ CONSTANTS:
 
 * TEMPORARY TEST SWITCHES - while the two candidate-search models
 * (SELECT_CANDIDATE_DOCUMENTS, eDocument-driven/DIRECT=1, vs
-* SELECT_CANDIDATE_DOCUMENTS_TRANSFER, J_1BNFDOC DIRECT=2 direct) are
+* SELECT_TRANSFER_CANDIDATES, J_1BNFDOC DIRECT=2 direct) are
 * being validated side by side, flip either flag here to isolate one
 * from the other during a search - both default to active, which is
 * today's behavior (additive, both run). Once the model is decided,

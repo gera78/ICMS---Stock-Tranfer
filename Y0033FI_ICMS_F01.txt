@@ -466,7 +466,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
-*&      Form  SELECT_CANDIDATE_DOCUMENTS_TRANSFER
+*&      Form  SELECT_TRANSFER_CANDIDATES
 *&---------------------------------------------------------------------*
 * Second, independent candidate source, for the intercompany stock
 * transfer flow: J_1BNFDOC itself (DIRECT = '2', emitted at the ORIGIN
@@ -504,7 +504,7 @@ ENDFORM.
 *   PLANT_REGION  = destination region - already on the header
 *                   (J_1BNFDOC-REGIO is the BR partner's own region)
 *---------------------------------------------------------------------*
-FORM select_candidate_documents_transfer USING pu_bukrs TYPE bukrs.
+FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
 
   DATA(lt_nfenum) = s_nfenum[].
   PERFORM pad_nfenum_range CHANGING lt_nfenum.
