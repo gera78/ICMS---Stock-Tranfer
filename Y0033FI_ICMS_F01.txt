@@ -33,6 +33,30 @@ FORM check_bukrs_authority USING pu_bukrs TYPE bukrs.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  CHECK_SEARCH_FILTERS
+*&---------------------------------------------------------------------*
+* "Search New Candidates" (P_MNEW) reads EDOCUMENT/EDOBRINCOMING -
+* company-wide tables with no built-in scoping of their own (see
+* SELECT_CANDIDATE_DOCUMENTS) - P_BUKRS alone does not limit that read
+* at all. Left completely open (every one of these select-options
+* empty), a search would walk the company's entire eDocument history
+* in one go, both slow and - per the earlier fix - still capable of
+* writing a Y0033FI_ICM_EDOC row for every LINK_ERROR found along the
+* way. Require at least one other filter to narrow it down first.
+* "View My Candidates" is not checked here - it only ever reads our
+* own already-bounded Y0033FI_ICM_ITEM data, not the company-wide
+* eDocument tables.
+*---------------------------------------------------------------------*
+FORM check_search_filters.
+
+  IF s_datum[]  IS INITIAL AND s_nfenum[] IS INITIAL AND s_docnum[] IS INITIAL
+     AND s_series[] IS INITIAL AND s_docdat[] IS INITIAL AND s_acckey[] IS INITIAL.
+    MESSAGE 'Fill in at least one filter besides Company Code' TYPE 'E'.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  GET_COMPANY_CURRENCY
 *&---------------------------------------------------------------------*
 FORM get_company_currency USING pu_bukrs TYPE bukrs

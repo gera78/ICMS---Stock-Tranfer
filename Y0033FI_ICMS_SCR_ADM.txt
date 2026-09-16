@@ -212,6 +212,9 @@ AT SELECTION-SCREEN.
       MESSAGE 'Enter a Company Code' TYPE 'E'.
     ENDIF.
     PERFORM check_bukrs_authority USING p_bukrs.
+    IF p_mnew = 'X'.
+      PERFORM check_search_filters.
+    ENDIF.
   ENDIF.
 
 * "Master" checkboxes (B3B) - group-toggle the real filter checkboxes
