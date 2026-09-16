@@ -846,6 +846,48 @@ FORM build_celltab.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  BUILD_DOCNUM_COLOR
+*&---------------------------------------------------------------------*
+* Alternates a light background tint on the DOCNUM cell every time the
+* nota fiscal changes going down GIT_ITEM, so it's easy to spot where
+* one nota's items end and the next one's begin. Relies on GIT_ITEM
+* being grouped by DOCNUM (see BUILD_SORT_TABLE) - if the user manually
+* re-sorts the grid by another column, each row keeps the color it was
+* assigned here (color travels with the row), so it stops looking
+* "grouped" but is never wrong for that row's own DOCNUM.
+*---------------------------------------------------------------------*
+FORM build_docnum_color.
+
+  DATA lv_last_docnum TYPE j_1bnfdoc-docnum.
+  DATA lv_first_row   TYPE abap_bool VALUE abap_true.
+  DATA lv_color_col   TYPE i.
+
+  LOOP AT git_item INTO gwa_item.
+    DATA(lv_tabix) = sy-tabix.
+
+    IF lv_first_row = abap_true OR gwa_item-docnum <> lv_last_docnum.
+      lv_first_row   = abap_false.
+      lv_last_docnum = gwa_item-docnum.
+      " Flip between "no tint" (0) and COL_GROUP (7, the standard ALV
+      " color for marking a row as part of a group) each time DOCNUM changes.
+      IF lv_color_col = 7.
+        lv_color_col = 0.
+      ELSE.
+        lv_color_col = 7.
+      ENDIF.
+    ENDIF.
+
+    CLEAR gwa_item-color_tab.
+    IF lv_color_col <> 0.
+      APPEND VALUE #( fname = 'DOCNUM' color-col = lv_color_col color-int = 0 color-inv = 0 )
+        TO gwa_item-color_tab.
+    ENDIF.
+    MODIFY git_item FROM gwa_item INDEX lv_tabix TRANSPORTING color_tab.
+  ENDLOOP.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  BUILD_STATUS_ICONS
 *&---------------------------------------------------------------------*
 * Maps each item's STATUS to a traffic-light icon shown in its own
@@ -1663,10 +1705,10 @@ FORM build_fieldcat USING pu_mode TYPE c.
   ls_fcat-outputlen = 12.
   ls_fcat-hotspot   = abap_true.
   APPEND ls_fcat TO gt_fcat.
+  add_field 'DOCDAT'      'NFe Date'           10.
   add_field 'NFENUM'      'NFe Number'         12.
-  add_field 'SERIES'      'Series'              4.
-  add_field 'DOCDAT'      'Nota Date'          10.
   add_field 'ITMNUM'      'Item'                6.
+  add_field 'SERIES'      'Series'              4.
   add_field 'SEQNR'       'Cycle'               6.
 
   " MATNR gets its own entry (not the plain macro) so the ALV applies
@@ -1734,15 +1776,20 @@ ENDFORM.
 *&      Form  BUILD_SORT_TABLE
 *&---------------------------------------------------------------------*
 * Default sort for the main item grid: most recent nota fiscal first
-* (DOCDAT descending), then most recently created candidate first
-* (CRE_DATE descending) as a tiebreaker. The user can still click any
-* column header to re-sort manually - this only sets the initial order.
+* (DOCDAT descending), then grouped by DOCNUM (so every item of the
+* same nota fiscal is always adjacent - two notas could otherwise tie
+* on both DOCDAT and CRE_DATE and interleave, which would also break
+* the DOCNUM background banding in BUILD_DOCNUM_COLOR), then most
+* recently created candidate first (CRE_DATE descending) as the final
+* tiebreaker. The user can still click any column header to re-sort
+* manually - this only sets the initial order.
 *---------------------------------------------------------------------*
 FORM build_sort_table.
 
   CLEAR gt_sort.
 
-  APPEND VALUE #( spos = 1 fieldname = 'DOCDAT'  up = space down = abap_true ) TO gt_sort.
-  APPEND VALUE #( spos = 2 fieldname = 'CRE_DATE' up = space down = abap_true ) TO gt_sort.
+  APPEND VALUE #( spos = 1 fieldname = 'DOCDAT'   up = space down = abap_true ) TO gt_sort.
+  APPEND VALUE #( spos = 2 fieldname = 'DOCNUM'   up = abap_true down = space ) TO gt_sort.
+  APPEND VALUE #( spos = 3 fieldname = 'CRE_DATE' up = space down = abap_true ) TO gt_sort.
 
 ENDFORM.

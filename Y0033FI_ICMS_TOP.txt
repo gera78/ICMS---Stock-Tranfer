@@ -201,7 +201,7 @@ TYPES:
     msg           TYPE char200,
     status_icon   TYPE icon_d,       " traffic-light icon for STATUS - see BUILD_STATUS_ICONS
     status_descr  TYPE char40,       " "<code> - <description>", shown next to STATUS_ICON - see BUILD_STATUS_DESCR
-    color_tab     TYPE lvc_t_scol,  " per-cell font color - no longer populated (BUILD_COLOR_TAB removed); kept because SCR_100/SCR_200 still reference CTAB_FNAME = 'COLOR_TAB' in the ALV layout
+    color_tab     TYPE lvc_t_scol,  " per-cell background color - DOCNUM cell only, alternated per nota fiscal, see BUILD_DOCNUM_COLOR
     celltab       TYPE lvc_t_styl,  " per-cell style: disables every
                                      " column except SEL, so the grid
                                      " doesn't look editable everywhere
