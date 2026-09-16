@@ -44,7 +44,7 @@ MODULE user_command_0100 INPUT.
         PERFORM refresh_from_db USING p_bukrs.
         PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
-        PERFORM build_docnum_color.
+        PERFORM build_nota_color.
         PERFORM build_status_icons.
         PERFORM build_status_descr.
         go_alv->refresh_table_display( ).
@@ -56,7 +56,7 @@ MODULE user_command_0100 INPUT.
         PERFORM refresh_from_db USING p_bukrs.
         PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
-        PERFORM build_docnum_color.
+        PERFORM build_nota_color.
         PERFORM build_status_icons.
         PERFORM build_status_descr.
         go_alv->refresh_table_display( ).
@@ -68,7 +68,7 @@ MODULE user_command_0100 INPUT.
         PERFORM refresh_from_db USING p_bukrs.
         PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
-        PERFORM build_docnum_color.
+        PERFORM build_nota_color.
         PERFORM build_status_icons.
         PERFORM build_status_descr.
         go_alv->refresh_table_display( ).

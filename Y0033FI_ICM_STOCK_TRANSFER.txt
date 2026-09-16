@@ -49,7 +49,7 @@ START-OF-SELECTION.
     PERFORM apply_status_filter USING gr_status_filt.
   ENDIF.
   PERFORM build_celltab.
-  PERFORM build_docnum_color.
+  PERFORM build_nota_color.
   PERFORM build_status_icons.
   PERFORM build_status_descr.
 

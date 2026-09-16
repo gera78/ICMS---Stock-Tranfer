@@ -879,11 +879,12 @@ FORM build_celltab.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
-*&      Form  BUILD_DOCNUM_COLOR
+*&      Form  BUILD_NOTA_COLOR
 *&---------------------------------------------------------------------*
-* Alternates a light background tint on the DOCNUM cell every time the
-* nota fiscal changes going down GIT_ITEM, so it's easy to spot where
-* one nota's items end and the next one's begin.
+* Alternates a light background tint on the NFe Date/NFe Number/Item
+* cells (the leading identifying columns - see BUILD_FIELDCAT) every
+* time the nota fiscal changes going down GIT_ITEM, so it's easy to
+* spot where one nota's items end and the next one's begin.
 *
 * GIT_ITEM is physically re-sorted here first (NFe Date / NFe Number /
 * Item, matching BUILD_SORT_TABLE) instead of relying on GT_SORT alone
@@ -897,7 +898,7 @@ ENDFORM.
 * the row), so it stops looking grouped but is never wrong for that
 * row's own nota fiscal.
 *---------------------------------------------------------------------*
-FORM build_docnum_color.
+FORM build_nota_color.
 
   SORT git_item BY docdat DESCENDING nfenum ASCENDING itmnum ASCENDING.
 
@@ -922,7 +923,11 @@ FORM build_docnum_color.
 
     CLEAR gwa_item-color_tab.
     IF lv_color_col <> 0.
-      APPEND VALUE #( fname = 'DOCNUM' color-col = lv_color_col color-int = 0 color-inv = 0 )
+      APPEND VALUE #( fname = 'DOCDAT' color-col = lv_color_col color-int = 0 color-inv = 0 )
+        TO gwa_item-color_tab.
+      APPEND VALUE #( fname = 'NFENUM' color-col = lv_color_col color-int = 0 color-inv = 0 )
+        TO gwa_item-color_tab.
+      APPEND VALUE #( fname = 'ITMNUM' color-col = lv_color_col color-int = 0 color-inv = 0 )
         TO gwa_item-color_tab.
     ENDIF.
     MODIFY git_item FROM gwa_item INDEX lv_tabix TRANSPORTING color_tab.
@@ -1763,6 +1768,13 @@ FORM build_fieldcat USING pu_mode TYPE c.
   " (see BUILD_STATUS_DESCR) so the user learns the numeric codes.
   add_field 'STATUS_DESCR' 'Status'            28.
 
+  " Display order: NFe Date, NFe Number, Item first (also the sort/
+  " grouping key - see BUILD_SORT_TABLE/BUILD_NOTA_COLOR), then
+  " DocNum, Series, Cycle.
+  add_field 'DOCDAT'      'NFe Date'           10.
+  add_field 'NFENUM'      'NFe Number'         12.
+  add_field 'ITMNUM'      'Item'                6.
+
   " DOCNUM is clickable (hotspot) - opens J1BNFE. See LCL_ALV_EVENTS.
   CLEAR ls_fcat.
   ls_fcat-fieldname = 'DOCNUM'.
@@ -1770,9 +1782,6 @@ FORM build_fieldcat USING pu_mode TYPE c.
   ls_fcat-outputlen = 12.
   ls_fcat-hotspot   = abap_true.
   APPEND ls_fcat TO gt_fcat.
-  add_field 'DOCDAT'      'NFe Date'           10.
-  add_field 'NFENUM'      'NFe Number'         12.
-  add_field 'ITMNUM'      'Item'                6.
   add_field 'SERIES'      'Series'              4.
   add_field 'SEQNR'       'Cycle'               6.
 
@@ -1856,7 +1865,7 @@ ENDFORM.
 * Default sort for the main item grid: most recent nota fiscal first
 * (DOCDAT descending), then by NFe Number and Item (both ascending) -
 * this also groups every item of the same nota fiscal together, which
-* BUILD_DOCNUM_COLOR relies on (it physically re-sorts GIT_ITEM the
+* BUILD_NOTA_COLOR relies on (it physically re-sorts GIT_ITEM the
 * same way before banding, since GT_SORT here only affects the ALV's
 * own display, not GIT_ITEM's underlying row order). The user can
 * still click any column header to re-sort manually - this only sets
