@@ -320,12 +320,31 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
   " candidate that got this far) - hundreds of eDocuments meant
   " hundreds of sequential round trips, the main cause of a slow
   " search. All three are now read once, in bulk, before the loop.
+  "
+  " EDOBRINCOMING-NFENUM/SERIES are NOT the same data elements as
+  " J_1BNFDOC-NFENUM/SERIES (same names, different types/lengths - see
+  " the same warning in SYNC_EDOC_TRACKING below), so FOR ALL ENTRIES
+  " can't compare them directly ("fields must have the same type and
+  " length"). Converting into a driving table typed against
+  " J_1BNFDOC's own fields first, via VALUE (implicit MOVE
+  " conversion), satisfies that check.
+  TYPES: BEGIN OF ty_nfe_key,
+           nfenum TYPE j_1bnfdoc-nfenum,
+           series TYPE j_1bnfdoc-series,
+         END OF ty_nfe_key.
+  DATA lt_nfe_keys TYPE STANDARD TABLE OF ty_nfe_key WITH DEFAULT KEY.
+  LOOP AT lt_inc INTO DATA(ls_inc_key).
+    APPEND VALUE #( nfenum = ls_inc_key-nfenum series = ls_inc_key-series ) TO lt_nfe_keys.
+  ENDLOOP.
+  SORT lt_nfe_keys.
+  DELETE ADJACENT DUPLICATES FROM lt_nfe_keys.
+
   SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel
     FROM j_1bnfdoc
     INTO TABLE @DATA(lt_all_nfdoc)
-    FOR ALL ENTRIES IN @lt_inc
-    WHERE nfenum = @lt_inc-nfenum
-      AND series = @lt_inc-series
+    FOR ALL ENTRIES IN @lt_nfe_keys
+    WHERE nfenum = @lt_nfe_keys-nfenum
+      AND series = @lt_nfe_keys-series
       AND bukrs  = @pu_bukrs
       AND direct = '1'
       AND docnum IN @s_docnum
