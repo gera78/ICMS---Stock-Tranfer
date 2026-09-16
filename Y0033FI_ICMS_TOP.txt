@@ -93,9 +93,9 @@ CONSTANTS:
 * being validated side by side, flip either flag here to isolate one
 * from the other during a search - both default to active, which is
 * today's behavior (additive, both run). Once the model is decided,
-* delete these constants together with whichever PERFORM call(s) they
+* delete these variables together with whichever PERFORM call(s) they
 * guard, in both Y0033FI_ICM_STOCK_TRANSFER and _ADM.
-CONSTANTS:
+DATA:
   gc_enable_search_edoc     TYPE abap_bool VALUE abap_true,
   gc_enable_search_transfer TYPE abap_bool VALUE abap_true.
 
