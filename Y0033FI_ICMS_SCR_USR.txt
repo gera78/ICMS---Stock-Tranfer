@@ -72,19 +72,26 @@ SELECTION-SCREEN BEGIN OF BLOCK b3b WITH FRAME TITLE TEXT-b3b.
 * Status filter for "View My Candidates" - every status a saved item
 * can be in. All checked by default. Same icon+label approach as B3A.
 *
-* Two "master" checkboxes group-toggle what a regular user actually
-* acts on from this screen (Approve/Delete/Request Reversal - see
-* Y0033FI_ICMS_SCR_100): 010/040/050 vs everything else (waiting on
-* admin, or already closed out). USER-COMMAND forces an immediate
-* refresh so the children update right away - see AT SELECTION-SCREEN
-* below. The 10 real filter checkboxes below stay in a fixed position
-* either way - this is just a quick way to mark/unmark the group.
+* Three "master" checkboxes group-toggle what a regular user actually
+* acts on from this screen (Approve/Delete/Reject/Request Reversal -
+* see Y0033FI_ICMS_SCR_100): needs my action (010/050), reversal
+* candidates (040), and everything else (waiting on admin, or already
+* closed out). USER-COMMAND forces an immediate refresh so the
+* children update right away - see AT SELECTION-SCREEN below. The 10
+* real filter checkboxes below stay in a fixed position either way -
+* this is just a quick way to mark/unmark a group. All three are also
+* reset to their default state whenever the mode switches to View (see
+* MOD_CHG below), not just at screen startup.
 SELECTION-SCREEN BEGIN OF LINE.
 PARAMETERS p_mvg1 TYPE char1 AS CHECKBOX DEFAULT 'X' USER-COMMAND mvg1 MODIF ID fv.
 SELECTION-SCREEN COMMENT 4(60) c_mvg1 MODIF ID fv.
 SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN BEGIN OF LINE.
-PARAMETERS p_mvg2 TYPE char1 AS CHECKBOX DEFAULT 'X' USER-COMMAND mvg2 MODIF ID fv.
+PARAMETERS p_mvg3 TYPE char1 AS CHECKBOX DEFAULT 'X' USER-COMMAND mvg3 MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(60) c_mvg3 MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_mvg2 TYPE char1 AS CHECKBOX USER-COMMAND mvg2 MODIF ID fv.
 SELECTION-SCREEN COMMENT 4(60) c_mvg2 MODIF ID fv.
 SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN ULINE /1(79) MODIF ID fv.
@@ -160,8 +167,9 @@ INITIALIZATION.
   c_vrv_ic = icon_led_red.          c_vrv_tx = '070 - Reversed'.
   c_ver_ic = icon_message_error.    c_ver_tx = '990 - Error'.
 
-  c_mvg1 = 'Needs my action (010, 040, 050)'.
-  c_mvg2 = 'Others (waiting on admin / already closed)'.
+  c_mvg1 = 'Needs my action (010, 050)'.
+  c_mvg3 = 'Reversal (040)'.
+  c_mvg2 = 'Others (015, 020, 025, 030, 060, 070, 990)'.
 
 AT SELECTION-SCREEN OUTPUT.
   LOOP AT SCREEN.
@@ -189,12 +197,30 @@ AT SELECTION-SCREEN.
     ENDIF.
   ENDIF.
 
+* Mode just switched (MOD_CHG fires for any change within the P_MNEW/
+* P_MVIEW radio group, not only when P_MNEW itself is clicked) - reset
+* each mode's own status filter to its defined default, exactly as if
+* the screen were opened fresh in that mode. This intentionally
+* overwrites any manual per-checkbox tweak made before switching away.
+  IF sy-ucomm = 'MOD_CHG'.
+    IF p_mnew = 'X'.
+      p_sre = abap_true.  p_snc = abap_false.  p_ser = abap_false.
+    ELSEIF p_mview = 'X'.
+      p_vca = abap_true.   p_vcd = abap_true.                    " needs my action (010, 050)
+      p_vpo = abap_true.                                         " reversal (040)
+      p_vrj = abap_false.  p_vap = abap_false.  p_vpf = abap_false.
+      p_vpg = abap_false.  p_vrr = abap_false.  p_vrv = abap_false.  p_ver = abap_false. " others
+    ENDIF.
+  ENDIF.
+
 * "Master" checkboxes (B3B) - group-toggle the real filter checkboxes
 * when clicked. See the block comment above P_MVG1 for what each
 * group covers.
   CASE sy-ucomm.
     WHEN 'MVG1'.
-      p_vca = p_mvg1.  p_vpo = p_mvg1.  p_vcd = p_mvg1.
+      p_vca = p_mvg1.  p_vcd = p_mvg1.
+    WHEN 'MVG3'.
+      p_vpo = p_mvg3.
     WHEN 'MVG2'.
       p_vrj = p_mvg2.  p_vap = p_mvg2.  p_vpf = p_mvg2.  p_vpg = p_mvg2.
       p_vrr = p_mvg2.  p_vrv = p_mvg2.  p_ver = p_mvg2.
@@ -206,8 +232,9 @@ AT SELECTION-SCREEN.
 * trip to the server, e.g. pressing Execute) kept showing whichever
 * value the master had last, even after a child was unchecked
 * individually, instead of tracking its children's real combined state.
-  p_mvg1 = COND #( WHEN p_vca = abap_true AND p_vpo = abap_true AND p_vcd = abap_true
+  p_mvg1 = COND #( WHEN p_vca = abap_true AND p_vcd = abap_true
                     THEN abap_true ELSE abap_false ).
+  p_mvg3 = COND #( WHEN p_vpo = abap_true THEN abap_true ELSE abap_false ).
   p_mvg2 = COND #( WHEN p_vrj = abap_true AND p_vap = abap_true AND p_vpf = abap_true
                          AND p_vpg = abap_true AND p_vrr = abap_true AND p_vrv = abap_true
                          AND p_ver = abap_true
