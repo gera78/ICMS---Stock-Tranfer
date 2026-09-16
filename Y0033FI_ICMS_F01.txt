@@ -858,30 +858,40 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 * Alternates a light background tint on the DOCNUM cell every time the
 * nota fiscal changes going down GIT_ITEM, so it's easy to spot where
-* one nota's items end and the next one's begin. Relies on GIT_ITEM
-* being grouped by DOCNUM (see BUILD_SORT_TABLE) - if the user manually
-* re-sorts the grid by another column, each row keeps the color it was
-* assigned here (color travels with the row), so it stops looking
-* "grouped" but is never wrong for that row's own DOCNUM.
+* one nota's items end and the next one's begin.
+*
+* GIT_ITEM is physically re-sorted here first (NFe Date / NFe Number /
+* Item, matching BUILD_SORT_TABLE) instead of relying on GT_SORT alone
+* - GT_SORT only tells the ALV control how to display the data, it
+* does NOT reorder the underlying internal table, so grouping change
+* detection below would otherwise walk GIT_ITEM in whatever order it
+* happened to be built (DB read order), not the order actually shown
+* on screen - the exact cause of colors looking "wrong"/not grouped.
+* If the user manually re-sorts the grid by clicking another column
+* header, each row keeps the color assigned here (color travels with
+* the row), so it stops looking grouped but is never wrong for that
+* row's own nota fiscal.
 *---------------------------------------------------------------------*
 FORM build_docnum_color.
 
-  DATA lv_last_docnum TYPE j_1bnfdoc-docnum.
+  SORT git_item BY docdat DESCENDING nfenum ASCENDING itmnum ASCENDING.
+
+  DATA lv_last_nfenum TYPE j_1bnfdoc-nfenum.
   DATA lv_first_row   TYPE abap_bool VALUE abap_true.
   DATA lv_color_col   TYPE i.
 
   LOOP AT git_item INTO gwa_item.
     DATA(lv_tabix) = sy-tabix.
 
-    IF lv_first_row = abap_true OR gwa_item-docnum <> lv_last_docnum.
+    IF lv_first_row = abap_true OR gwa_item-nfenum <> lv_last_nfenum.
       lv_first_row   = abap_false.
-      lv_last_docnum = gwa_item-docnum.
-      " Flip between "no tint" (0) and COL_GROUP (7, the standard ALV
-      " color for marking a row as part of a group) each time DOCNUM changes.
-      IF lv_color_col = 7.
+      lv_last_nfenum = gwa_item-nfenum.
+      " Flip between "no tint" (0) and COL_POSITIVE (5, green) each
+      " time the nota fiscal changes.
+      IF lv_color_col = 5.
         lv_color_col = 0.
       ELSE.
-        lv_color_col = 7.
+        lv_color_col = 5.
       ENDIF.
     ENDIF.
 
@@ -1758,20 +1768,6 @@ FORM build_fieldcat USING pu_mode TYPE c.
   add_field 'ICMS_RATE'   'ICMS Rate'          10.
   add_field 'ICMS_VAL'    'ICMS on NF'         18.
 
-  " A607 access-key fields (see DETERMINE_BENEFIT_PERCENTAGE) - shown
-  " for traceability, so it's visible exactly which combination
-  " (country/origin/destination/material origin) produced the matched
-  " condition record and its validity window, right before the
-  " resulting BENEFIT_PERCENT below.
-  add_field 'LAND1'      'Country'             4.
-  add_field 'REGIO_ORIG' 'Ship-from UF'       12.
-  add_field 'REGIO_DEST' 'Ship-to UF'         12.
-  add_field 'MATORG'     'Mat. Origin'        10.
-  add_field 'KSCHL'      'Cond. Type'         10.
-  add_field 'KNUMH'      'Condition Rec.'     14.
-  add_field 'DATAB'      'Valid From'         10.
-  add_field 'DATBI'      'Valid To'           10.
-
   CLEAR ls_fcat.
   ls_fcat-fieldname = 'BENEFIT_PERCENT'.
   ls_fcat-coltext   = 'Benefit %'.
@@ -1790,10 +1786,23 @@ FORM build_fieldcat USING pu_mode TYPE c.
   " include, registered on the grid in each screen's PBO.
   CLEAR ls_fcat.
   ls_fcat-fieldname = 'EDOC_GUID'.
-  ls_fcat-coltext   = 'Latest eDocument'.
+  ls_fcat-coltext   = 'eDocument'.
   ls_fcat-outputlen = 20.
   ls_fcat-hotspot   = abap_true.
   APPEND ls_fcat TO gt_fcat.
+
+  " A607 access-key fields (see DETERMINE_BENEFIT_PERCENTAGE) - shown
+  " for traceability, so it's visible exactly which combination
+  " (country/origin/destination/material origin) produced the matched
+  " condition record and its validity window.
+  add_field 'LAND1'      'Country'             4.
+  add_field 'REGIO_ORIG' 'Ship-from UF'       12.
+  add_field 'REGIO_DEST' 'Ship-to UF'         12.
+  add_field 'MATORG'     'Mat. Origin'        10.
+  add_field 'KSCHL'      'Cond. Type'         10.
+  add_field 'KNUMH'      'Condition Rec.'     14.
+  add_field 'DATAB'      'Valid From'         10.
+  add_field 'DATBI'      'Valid To'           10.
 
   " Same columns for both screens now (admin and user cockpit share
   " this catalog regardless of PU_MODE) - all of these come from the
@@ -1820,20 +1829,20 @@ ENDFORM.
 *&      Form  BUILD_SORT_TABLE
 *&---------------------------------------------------------------------*
 * Default sort for the main item grid: most recent nota fiscal first
-* (DOCDAT descending), then grouped by DOCNUM (so every item of the
-* same nota fiscal is always adjacent - two notas could otherwise tie
-* on both DOCDAT and CRE_DATE and interleave, which would also break
-* the DOCNUM background banding in BUILD_DOCNUM_COLOR), then most
-* recently created candidate first (CRE_DATE descending) as the final
-* tiebreaker. The user can still click any column header to re-sort
-* manually - this only sets the initial order.
+* (DOCDAT descending), then by NFe Number and Item (both ascending) -
+* this also groups every item of the same nota fiscal together, which
+* BUILD_DOCNUM_COLOR relies on (it physically re-sorts GIT_ITEM the
+* same way before banding, since GT_SORT here only affects the ALV's
+* own display, not GIT_ITEM's underlying row order). The user can
+* still click any column header to re-sort manually - this only sets
+* the initial order.
 *---------------------------------------------------------------------*
 FORM build_sort_table.
 
   CLEAR gt_sort.
 
-  APPEND VALUE #( spos = 1 fieldname = 'DOCDAT'   up = space down = abap_true ) TO gt_sort.
-  APPEND VALUE #( spos = 2 fieldname = 'DOCNUM'   up = abap_true down = space ) TO gt_sort.
-  APPEND VALUE #( spos = 3 fieldname = 'CRE_DATE' up = space down = abap_true ) TO gt_sort.
+  APPEND VALUE #( spos = 1 fieldname = 'DOCDAT'  up = space      down = abap_true ) TO gt_sort.
+  APPEND VALUE #( spos = 2 fieldname = 'NFENUM'  up = abap_true  down = space ) TO gt_sort.
+  APPEND VALUE #( spos = 3 fieldname = 'ITMNUM'  up = abap_true  down = space ) TO gt_sort.
 
 ENDFORM.
