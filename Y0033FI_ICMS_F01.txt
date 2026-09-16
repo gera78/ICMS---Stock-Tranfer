@@ -815,6 +815,14 @@ FORM build_celltab.
           'SERIES'       TO lt_fieldnames,
           'DOCDAT'       TO lt_fieldnames,
           'ICMS_VAL'     TO lt_fieldnames,
+          'LAND1'        TO lt_fieldnames,
+          'REGIO_ORIG'   TO lt_fieldnames,
+          'REGIO_DEST'   TO lt_fieldnames,
+          'MATORG'       TO lt_fieldnames,
+          'KSCHL'        TO lt_fieldnames,
+          'KNUMH'        TO lt_fieldnames,
+          'DATAB'        TO lt_fieldnames,
+          'DATBI'        TO lt_fieldnames,
           'BENEFIT_PERCENT' TO lt_fieldnames,
           'CREDIT_AMOUNT'   TO lt_fieldnames,
           'WAERS'        TO lt_fieldnames,
@@ -1727,6 +1735,20 @@ FORM build_fieldcat USING pu_mode TYPE c.
   add_field 'ICMS_OTHBAS' 'Other Base'         16.
   add_field 'ICMS_RATE'   'ICMS Rate'          10.
   add_field 'ICMS_VAL'    'ICMS on NF'         18.
+
+  " A607 access-key fields (see DETERMINE_BENEFIT_PERCENTAGE) - shown
+  " for traceability, so it's visible exactly which combination
+  " (country/origin/destination/material origin) produced the matched
+  " condition record and its validity window, right before the
+  " resulting BENEFIT_PERCENT below.
+  add_field 'LAND1'      'Country'             4.
+  add_field 'REGIO_ORIG' 'Ship-from UF'       12.
+  add_field 'REGIO_DEST' 'Ship-to UF'         12.
+  add_field 'MATORG'     'Mat. Origin'        10.
+  add_field 'KSCHL'      'Cond. Type'         10.
+  add_field 'KNUMH'      'Condition Rec.'     14.
+  add_field 'DATAB'      'Valid From'         10.
+  add_field 'DATBI'      'Valid To'           10.
 
   CLEAR ls_fcat.
   ls_fcat-fieldname = 'BENEFIT_PERCENT'.
