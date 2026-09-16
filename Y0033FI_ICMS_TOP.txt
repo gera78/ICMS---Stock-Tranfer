@@ -71,6 +71,7 @@ CONSTANTS:
     rejected           TYPE y0033fi_icm_status_n VALUE '015', " candidate rejected by user before approval - terminal, but treated like REVERSED by FILTER_ACTIVE_CYCLE so the nota/item can become a fresh candidate again in a future search
     approved           TYPE y0033fi_icm_status_n VALUE '020',
     post_failed        TYPE y0033fi_icm_status_n VALUE '025', " approved, POST_ONE_DOCUMENT attempted and failed (any reason - see MSG) - treated as a retry candidate, same as APPROVED, by POST_RELEASED_ITEMS
+    cancelled_pre_post TYPE y0033fi_icm_status_n VALUE '045', " approved/post_failed, but the source nota fiscal was found already cancelled (J_1BNFDOC-CANCEL) when POST_RELEASED_ITEMS went to post it - skipped, never reaches GL. Terminal, like REJECTED/REVERSED (see FILTER_ACTIVE_CYCLE/SAVE_CANDIDATES): a corrected nota can become a fresh candidate later.
     posting            TYPE y0033fi_icm_status_n VALUE '030',
     posted             TYPE y0033fi_icm_status_n VALUE '040',
     cancel_detected    TYPE y0033fi_icm_status_n VALUE '050',
@@ -93,6 +94,7 @@ CONSTANTS:
     cancel_detected    TYPE char20 VALUE 'CANCEL_DETECTED',
     reversal_requested TYPE char20 VALUE 'REVERSAL_REQUESTED',
     reversed           TYPE char20 VALUE 'REVERSED',
+    cancelled_pre_post TYPE char20 VALUE 'CANCELLED_PRE_POST',
     error              TYPE char20 VALUE 'ERROR',
     period_fallback    TYPE char20 VALUE 'PERIOD_FALLBACK',
     bapi_detail        TYPE char20 VALUE 'BAPI_DETAIL', " supplementary BAPI message, not a real transition - STATUS_FROM = STATUS_TO

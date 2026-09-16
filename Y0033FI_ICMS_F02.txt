@@ -51,6 +51,68 @@ FORM post_released_items.
     ENDLOOP.
   ENDIF.
 
+  " Skip items whose nota fiscal was already cancelled (J_1BNFDOC-CANCEL)
+  " by the time this run tries to post them - posting first and relying
+  " on CHECK_NF_CANCELLATION/reversal to clean up afterward would create
+  " a real FI document for a nota that's already void. Flagged with its
+  " own status (CANCELLED_PRE_POST) instead, so these never reach GL and
+  " the user can filter "victims of cancellation" before posting.
+  IF lt_approved IS NOT INITIAL.
+    " Structured single-field driving table (not a bare elementary
+    " itab) for FOR ALL ENTRIES - same workaround already used for
+    " LT_NFE_KEYS in SELECT_CANDIDATE_DOCUMENTS (Y0033FI_ICMS_F01).
+    TYPES: BEGIN OF ty_docnum_key,
+             docnum TYPE j_1bnfdoc-docnum,
+           END OF ty_docnum_key.
+    DATA lt_docnum_check TYPE STANDARD TABLE OF ty_docnum_key WITH DEFAULT KEY.
+    LOOP AT lt_approved INTO DATA(ls_appr_chk).
+      APPEND VALUE #( docnum = ls_appr_chk-docnum ) TO lt_docnum_check.
+    ENDLOOP.
+    SORT lt_docnum_check BY docnum.
+    DELETE ADJACENT DUPLICATES FROM lt_docnum_check COMPARING docnum.
+
+    DATA lt_cancelled_docnum TYPE STANDARD TABLE OF j_1bnfdoc-docnum WITH DEFAULT KEY.
+    SELECT docnum FROM j_1bnfdoc
+      INTO TABLE @lt_cancelled_docnum
+      FOR ALL ENTRIES IN @lt_docnum_check
+      WHERE docnum = @lt_docnum_check-docnum
+        AND cancel = @abap_true.
+    SORT lt_cancelled_docnum BY table_line.
+
+    DATA lv_victims TYPE i.
+    LOOP AT lt_approved INTO DATA(ls_victim).
+      READ TABLE lt_cancelled_docnum WITH KEY table_line = ls_victim-docnum
+        TRANSPORTING NO FIELDS BINARY SEARCH.
+      CHECK sy-subrc = 0.
+
+      DATA lv_subrc_v TYPE sy-subrc.
+      PERFORM enqueue_item USING ls_victim-docnum ls_victim-itmnum ls_victim-seqnr CHANGING lv_subrc_v.
+      IF lv_subrc_v <> 0.
+        CONTINUE.
+      ENDIF.
+
+      " STATUS = LS_VICTIM-STATUS guards against a stale batch, same as
+      " REQUEST_REVERSAL - if another session already moved this item on
+      " since LT_APPROVED was read, nothing is changed/logged here.
+      UPDATE y0033fi_icm_item SET status = @gc_status-cancelled_pre_post
+        WHERE docnum = @ls_victim-docnum AND itmnum = @ls_victim-itmnum AND seqnr = @ls_victim-seqnr
+          AND status = @ls_victim-status.
+
+      IF sy-subrc = 0.
+        PERFORM write_log USING ls_victim gc_action-cancelled_pre_post ls_victim-status gc_status-cancelled_pre_post
+                                 'Nota fiscal already cancelled - skipped before posting'.
+        lv_victims = lv_victims + 1.
+      ENDIF.
+
+      PERFORM dequeue_item USING ls_victim-docnum ls_victim-itmnum ls_victim-seqnr.
+      DELETE lt_approved.
+    ENDLOOP.
+
+    IF lv_victims > 0.
+      COMMIT WORK AND WAIT.
+    ENDIF.
+  ENDIF.
+
   IF lt_approved IS INITIAL.
     " Nothing to post is a normal, expected outcome (not every run has
     " approved items, or - online - nothing was marked) - TYPE E would

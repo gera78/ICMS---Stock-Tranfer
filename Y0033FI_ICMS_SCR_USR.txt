@@ -90,7 +90,7 @@ SELECTION-SCREEN BEGIN OF BLOCK b3b WITH FRAME TITLE TEXT-b3b.
 * see Y0033FI_ICMS_SCR_100): needs my action (010/050), reversal
 * candidates (040), and everything else (waiting on admin, or already
 * closed out). USER-COMMAND forces an immediate refresh so the
-* children update right away - see AT SELECTION-SCREEN below. The 10
+* children update right away - see AT SELECTION-SCREEN below. The 11
 * real filter checkboxes below stay in a fixed position either way -
 * this is just a quick way to mark/unmark a group. All three are also
 * reset to their default state whenever the mode switches to View (see
@@ -127,6 +127,11 @@ SELECTION-SCREEN BEGIN OF LINE.
 PARAMETERS p_vpf TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
 SELECTION-SCREEN COMMENT 4(4) c_vpf_ic MODIF ID fv.
 SELECTION-SCREEN COMMENT 9(35) c_vpf_tx MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_vcb TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(4) c_vcb_ic MODIF ID fv.
+SELECTION-SCREEN COMMENT 9(35) c_vcb_tx MODIF ID fv.
 SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN BEGIN OF LINE.
 PARAMETERS p_vpg TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
@@ -173,6 +178,7 @@ INITIALIZATION.
   c_vrj_ic = icon_led_inactive.     c_vrj_tx = '015 - Rejected'.
   c_vap_ic = icon_checked.          c_vap_tx = '020 - Approved'.
   c_vpf_ic = icon_message_warning.  c_vpf_tx = '025 - Post Failed'.
+  c_vcb_ic = icon_cancel.           c_vcb_tx = '045 - Cancelled Before Posting'.
   c_vpg_ic = icon_locked.           c_vpg_tx = '030 - Posting'.
   c_vpo_ic = icon_led_green.        c_vpo_tx = '040 - Posted'.
   c_vcd_ic = icon_alert.            c_vcd_tx = '050 - Cancel Detected'.
@@ -182,7 +188,7 @@ INITIALIZATION.
 
   c_mvg1 = 'Needs my action (010, 050)'.
   c_mvg3 = 'Reversal (040)'.
-  c_mvg2 = 'Others (015, 020, 025, 030, 060, 070, 990)'.
+  c_mvg2 = 'Others (015, 020, 025, 045, 030, 060, 070, 990)'.
 
 AT SELECTION-SCREEN OUTPUT.
   LOOP AT SCREEN.
@@ -221,7 +227,7 @@ AT SELECTION-SCREEN.
     ELSEIF p_mview = 'X'.
       p_vca = abap_true.   p_vcd = abap_true.                    " needs my action (010, 050)
       p_vpo = abap_true.                                         " reversal (040)
-      p_vrj = abap_false.  p_vap = abap_false.  p_vpf = abap_false.
+      p_vrj = abap_false.  p_vap = abap_false.  p_vpf = abap_false.  p_vcb = abap_false.
       p_vpg = abap_false.  p_vrr = abap_false.  p_vrv = abap_false.  p_ver = abap_false. " others
     ENDIF.
   ENDIF.
@@ -235,7 +241,7 @@ AT SELECTION-SCREEN.
     WHEN 'MVG3'.
       p_vpo = p_mvg3.
     WHEN 'MVG2'.
-      p_vrj = p_mvg2.  p_vap = p_mvg2.  p_vpf = p_mvg2.  p_vpg = p_mvg2.
+      p_vrj = p_mvg2.  p_vap = p_mvg2.  p_vpf = p_mvg2.  p_vcb = p_mvg2.  p_vpg = p_mvg2.
       p_vrr = p_mvg2.  p_vrv = p_mvg2.  p_ver = p_mvg2.
   ENDCASE.
 
@@ -248,7 +254,7 @@ AT SELECTION-SCREEN.
   p_mvg1 = COND #( WHEN p_vca = abap_true AND p_vcd = abap_true
                     THEN abap_true ELSE abap_false ).
   p_mvg3 = COND #( WHEN p_vpo = abap_true THEN abap_true ELSE abap_false ).
-  p_mvg2 = COND #( WHEN p_vrj = abap_true AND p_vap = abap_true AND p_vpf = abap_true
+  p_mvg2 = COND #( WHEN p_vrj = abap_true AND p_vap = abap_true AND p_vpf = abap_true AND p_vcb = abap_true
                          AND p_vpg = abap_true AND p_vrr = abap_true AND p_vrv = abap_true
                          AND p_ver = abap_true
                     THEN abap_true ELSE abap_false ).

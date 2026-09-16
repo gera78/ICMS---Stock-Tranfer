@@ -129,7 +129,7 @@ ENDFORM.
 *&      Form  GET_STATUS_FILTER_VIEW
 *&---------------------------------------------------------------------*
 * Builds the status range for "View My Candidates" (and the admin
-* review screen) from the nine checkboxes declared in
+* review screen) from the eleven checkboxes declared in
 * Y0033FI_ICMS_SCR_USR / _SCR_ADM (MODIF ID FV) - one per status a
 * saved/persisted item can be in.
 *---------------------------------------------------------------------*
@@ -137,6 +137,7 @@ FORM get_status_filter_view USING pu_vca TYPE char1
                                    pu_vrj TYPE char1
                                    pu_vap TYPE char1
                                    pu_vpf TYPE char1
+                                   pu_vcb TYPE char1
                                    pu_vpg TYPE char1
                                    pu_vpo TYPE char1
                                    pu_vcd TYPE char1
@@ -156,6 +157,9 @@ FORM get_status_filter_view USING pu_vca TYPE char1
   ENDIF.
   IF pu_vpf = abap_true.
     APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-post_failed ) TO pc_range.
+  ENDIF.
+  IF pu_vcb = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-cancelled_pre_post ) TO pc_range.
   ENDIF.
   IF pu_vpg = abap_true.
     APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-posting ) TO pc_range.
@@ -855,7 +859,8 @@ FORM filter_active_cycle.
       WHERE docnum = @gwa_item-docnum
         AND itmnum = @gwa_item-itmnum
         AND status <> @gc_status-reversed
-        AND status <> @gc_status-rejected.
+        AND status <> @gc_status-rejected
+        AND status <> @gc_status-cancelled_pre_post.
 
     IF sy-subrc = 0.
       APPEND lv_tabix TO lt_remove_idx.
@@ -1068,6 +1073,8 @@ FORM build_status_icons.
         gwa_item-status_icon = icon_checked.              " waiting for admin to post
       WHEN gc_status-post_failed.
         gwa_item-status_icon = icon_message_warning.     " attempted, failed - see MSG; retry candidate, same as APPROVED
+      WHEN gc_status-cancelled_pre_post.
+        gwa_item-status_icon = icon_cancel.              " source nota cancelled before this item ever posted - terminal, no accounting document exists
       WHEN gc_status-posting.
         gwa_item-status_icon = icon_locked.              " transient posting lock
       WHEN gc_status-posted.
@@ -1127,6 +1134,7 @@ FORM status_code_to_descr USING    pu_status TYPE y0033fi_icm_status_n
     WHEN gc_status-rejected.           pc_descr = |{ pu_status } - Rejected|.
     WHEN gc_status-approved.           pc_descr = |{ pu_status } - Approved|.
     WHEN gc_status-post_failed.        pc_descr = |{ pu_status } - Post Failed|.
+    WHEN gc_status-cancelled_pre_post. pc_descr = |{ pu_status } - Cancelled Before Posting|.
     WHEN gc_status-posting.            pc_descr = |{ pu_status } - Posting|.
     WHEN gc_status-posted.             pc_descr = |{ pu_status } - Posted|.
     WHEN gc_status-cancel_detected.    pc_descr = |{ pu_status } - Cancel Detected|.
@@ -1389,7 +1397,8 @@ FORM save_candidates USING pu_id_exec TYPE char20.
       WHERE docnum = @ls_sel-docnum
         AND itmnum = @ls_sel-itmnum
         AND status <> @gc_status-reversed
-        AND status <> @gc_status-rejected.
+        AND status <> @gc_status-rejected
+        AND status <> @gc_status-cancelled_pre_post.
     IF lv_active_count > 0.
       lv_skip = lv_skip + 1.
       PERFORM dequeue_item USING ls_sel-docnum ls_sel-itmnum 0.
