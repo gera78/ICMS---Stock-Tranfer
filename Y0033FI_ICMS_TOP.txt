@@ -68,6 +68,7 @@ CONSTANTS:
 CONSTANTS:
   BEGIN OF gc_status,
     candidate          TYPE y0033fi_icm_status_n VALUE '010',
+    rejected           TYPE y0033fi_icm_status_n VALUE '015', " candidate rejected by user before approval - terminal, but treated like REVERSED by FILTER_ACTIVE_CYCLE so the nota/item can become a fresh candidate again in a future search
     approved           TYPE y0033fi_icm_status_n VALUE '020',
     post_failed        TYPE y0033fi_icm_status_n VALUE '025', " approved, POST_ONE_DOCUMENT attempted and failed (any reason - see MSG) - treated as a retry candidate, same as APPROVED, by POST_RELEASED_ITEMS
     posting            TYPE y0033fi_icm_status_n VALUE '030',
@@ -85,6 +86,7 @@ CONSTANTS:
   BEGIN OF gc_action,
     candidate_saved    TYPE char20 VALUE 'CANDIDATE_SAVED',
     candidate_deleted  TYPE char20 VALUE 'CANDIDATE_DELETED',
+    candidate_rejected TYPE char20 VALUE 'CANDIDATE_REJECTED',
     approved           TYPE char20 VALUE 'APPROVED',
     posting_started    TYPE char20 VALUE 'POSTING_STARTED',
     posted             TYPE char20 VALUE 'POSTED',

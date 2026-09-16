@@ -77,7 +77,7 @@ SELECTION-SCREEN BEGIN OF BLOCK b3b WITH FRAME TITLE TEXT-b3b.
 * Y0033FI_ICMS_SCR_100): 010/040/050 vs everything else (waiting on
 * admin, or already closed out). USER-COMMAND forces an immediate
 * refresh so the children update right away - see AT SELECTION-SCREEN
-* below. The 9 real filter checkboxes below stay in a fixed position
+* below. The 10 real filter checkboxes below stay in a fixed position
 * either way - this is just a quick way to mark/unmark the group.
 SELECTION-SCREEN BEGIN OF LINE.
 PARAMETERS p_mvg1 TYPE char1 AS CHECKBOX DEFAULT 'X' USER-COMMAND mvg1 MODIF ID fv.
@@ -92,6 +92,11 @@ SELECTION-SCREEN BEGIN OF LINE.
 PARAMETERS p_vca TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
 SELECTION-SCREEN COMMENT 4(4) c_vca_ic MODIF ID fv.
 SELECTION-SCREEN COMMENT 9(35) c_vca_tx MODIF ID fv.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS p_vrj TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(4) c_vrj_ic MODIF ID fv.
+SELECTION-SCREEN COMMENT 9(35) c_vrj_tx MODIF ID fv.
 SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN BEGIN OF LINE.
 PARAMETERS p_vap TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
@@ -145,6 +150,7 @@ INITIALIZATION.
   c_ser_ic = icon_message_error.    c_ser_tx = '990 - Error'.
 
   c_vca_ic = icon_led_yellow.       c_vca_tx = '010 - Candidate'.
+  c_vrj_ic = icon_led_inactive.     c_vrj_tx = '015 - Rejected'.
   c_vap_ic = icon_checked.          c_vap_tx = '020 - Approved'.
   c_vpf_ic = icon_message_warning.  c_vpf_tx = '025 - Post Failed'.
   c_vpg_ic = icon_locked.           c_vpg_tx = '030 - Posting'.
@@ -187,6 +193,6 @@ AT SELECTION-SCREEN.
     WHEN 'MVG1'.
       p_vca = p_mvg1.  p_vpo = p_mvg1.  p_vcd = p_mvg1.
     WHEN 'MVG2'.
-      p_vap = p_mvg2.  p_vpf = p_mvg2.  p_vpg = p_mvg2.
+      p_vrj = p_mvg2.  p_vap = p_mvg2.  p_vpf = p_mvg2.  p_vpg = p_mvg2.
       p_vrr = p_mvg2.  p_vrv = p_mvg2.  p_ver = p_mvg2.
   ENDCASE.
