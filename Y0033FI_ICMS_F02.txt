@@ -616,6 +616,15 @@ FORM execute_reversal.
       " a pending error. Full history stays in Y0033FI_ICM_LOG.
 
       ls_req-reversal_belnr = lv_reversal_belnr.
+      " WRITE_LOG's BELNR column always logs LS_ITEM-BELNR_FI (see
+      " WRITE_LOG) - overwritten here with the new reversal document
+      " instead of the original posted one, so this specific REVERSED
+      " log row shows the document this transition actually produced
+      " (same convention as POST_ONE_DOCUMENT logging the newly posted
+      " document, not some prior reference). The original document is
+      " still the one this whole loop is about and stays visible on
+      " every earlier log row for this item (POSTED, etc.).
+      ls_req-belnr_fi = lv_reversal_belnr.
       DATA lv_msg_reversed TYPE char200.
       lv_msg_reversed = |Reversed via { lv_reversal_belnr } (trigger { ls_req-reversal_trigger })|.
       PERFORM write_log USING ls_req gc_action-reversed gc_status-reversal_requested gc_status-reversed

@@ -1585,7 +1585,6 @@ FORM show_log_popup.
            status_from TYPE char40,
            status_to   TYPE char40,
            message     TYPE char200,
-           bukrs       TYPE bukrs,
            belnr       TYPE belnr_d,
            gjahr       TYPE gjahr,
            act_user    TYPE syuname,
@@ -1600,7 +1599,6 @@ FORM show_log_popup.
       action   = ls_log-action
       lognr    = ls_log-lognr
       message  = ls_log-message
-      bukrs    = ls_log-bukrs
       belnr    = ls_log-belnr
       gjahr    = ls_log-gjahr
       act_user = ls_log-act_user
@@ -1626,7 +1624,6 @@ FORM show_log_popup.
       lo_columns->get_column( 'STATUS_FROM' )->set_medium_text( 'Status From' ).
       lo_columns->get_column( 'STATUS_TO' )->set_medium_text( 'Status To' ).
       lo_columns->get_column( 'MESSAGE' )->set_medium_text( 'Log Message' ).
-      lo_columns->get_column( 'BUKRS' )->set_medium_text( 'Company' ).
       lo_columns->get_column( 'BELNR' )->set_medium_text( 'Acc. Document' ).
       lo_columns->get_column( 'GJAHR' )->set_medium_text( 'Year' ).
       lo_columns->get_column( 'ACT_USER' )->set_medium_text( 'User Name' ).
@@ -1959,11 +1956,12 @@ FORM build_fieldcat USING pu_mode TYPE c.
   " (see BUILD_STATUS_DESCR) so the user learns the numeric codes.
   add_field 'STATUS_DESCR' 'Status'            28.
 
-  " Display order: NFe Date, NFe Number, Item first (also the sort/
+  " Display order: NFe Date, NFe Number, Cycle, Item (also the sort/
   " grouping key - see BUILD_SORT_TABLE/BUILD_NOTA_COLOR), then
-  " DocNum, Series, Cycle.
+  " DocNum, Series.
   add_field 'DOCDAT'      'NFe Date'           10.
   add_field 'NFENUM'      'NFe Number'         12.
+  add_field 'SEQNR'       'Cycle'               6.
   add_field 'ITMNUM'      'Item'                6.
 
   " DOCNUM is clickable (hotspot) - opens J1BNFE. See LCL_ALV_EVENTS.
@@ -1974,7 +1972,6 @@ FORM build_fieldcat USING pu_mode TYPE c.
   ls_fcat-hotspot   = abap_true.
   APPEND ls_fcat TO gt_fcat.
   add_field 'SERIES'      'Series'              4.
-  add_field 'SEQNR'       'Cycle'               6.
 
   " MATNR gets its own entry (not the plain macro) so the ALV applies
   " the material number conversion exit (leading zero handling, etc.)
