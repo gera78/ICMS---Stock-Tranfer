@@ -185,7 +185,8 @@ ENDFORM.
 * specific matching row (highest MATCH_LEVEL) wins; a tie at the top
 * level is a configuration error - never guessed.
 *---------------------------------------------------------------------*
-FORM match_lane USING pu_key TYPE ty_lane_key
+FORM match_lane USING pu_key      TYPE ty_lane_key
+                       pu_lt_lane TYPE ty_it_lane
               CHANGING pc_origin_region TYPE t005u-bland
                        pc_dest_region   TYPE t005u-bland
                        pc_match_level   TYPE n
@@ -194,18 +195,28 @@ FORM match_lane USING pu_key TYPE ty_lane_key
   CLEAR: pc_origin_region, pc_dest_region, pc_match_level.
   pc_subrc = 4. " default: no match
 
-  SELECT * FROM y0033fi_icm_lane
-    INTO TABLE @DATA(lt_lane)
-    WHERE active     = @abap_true
-      AND valid_from <= @sy-datum
-      AND valid_to   >= @sy-datum
-      AND ( bukrs         = @pu_key-bukrs         OR bukrs         = @space )
-      AND ( vendor_code   = @pu_key-vendor_code   OR vendor_code   = @space )
-      AND ( vendor_tax_id = @pu_key-vendor_tax_id OR vendor_tax_id = @space )
-      AND ( vendor_region = @pu_key-vendor_region OR vendor_region = @space )
-      AND ( country       = @pu_key-country       OR country       = @space )
-      AND ( plant_code    = @pu_key-plant_code    OR plant_code    = @space )
-      AND ( plant_region  = @pu_key-plant_region  OR plant_region  = @space ).
+  " PU_LT_LANE is the whole Y0033FI_ICM_LANE table, read ONCE by the
+  " caller (SELECT_CANDIDATE_DOCUMENTS) instead of here - this FORM
+  " used to run its own SELECT on every single call (once per
+  " candidate row), which was one of the main causes of a slow search
+  " with many eDocuments; Y0033FI_ICM_LANE is a small config table that
+  " does not change during a single search run, so reading it once and
+  " filtering in memory (same conditions as the old SELECT) is both
+  " safe and far cheaper.
+  DATA lt_lane TYPE ty_it_lane.
+  LOOP AT pu_lt_lane INTO DATA(ls_lane_row)
+    WHERE active     = abap_true
+      AND valid_from <= sy-datum
+      AND valid_to   >= sy-datum
+      AND ( bukrs         = pu_key-bukrs         OR bukrs         = space )
+      AND ( vendor_code   = pu_key-vendor_code   OR vendor_code   = space )
+      AND ( vendor_tax_id = pu_key-vendor_tax_id OR vendor_tax_id = space )
+      AND ( vendor_region = pu_key-vendor_region OR vendor_region = space )
+      AND ( country       = pu_key-country       OR country       = space )
+      AND ( plant_code    = pu_key-plant_code    OR plant_code    = space )
+      AND ( plant_region  = pu_key-plant_region  OR plant_region  = space ).
+    APPEND ls_lane_row TO lt_lane.
+  ENDLOOP.
 
   CHECK lt_lane IS NOT INITIAL.
 
@@ -300,12 +311,48 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
   " belonging to another company simply won't resolve a DOCNUM there and
   " ends up as LINK_ERROR, same as any other unresolved GUID.
 
+  CHECK lt_inc IS NOT INITIAL.
+  SORT lt_inc BY edoc_guid.
+
+  " The following three reads used to happen ONE ROW AT A TIME inside
+  " the LOOP below (one J_1BNFDOC SELECT and one Y0033FI_ICM_EDOC
+  " SELECT SINGLE per eDocument, one Y0033FI_ICM_LANE SELECT per
+  " candidate that got this far) - hundreds of eDocuments meant
+  " hundreds of sequential round trips, the main cause of a slow
+  " search. All three are now read once, in bulk, before the loop.
+  SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel
+    FROM j_1bnfdoc
+    INTO TABLE @DATA(lt_all_nfdoc)
+    FOR ALL ENTRIES IN @lt_inc
+    WHERE nfenum = @lt_inc-nfenum
+      AND series = @lt_inc-series
+      AND bukrs  = @pu_bukrs
+      AND direct = '1'
+      AND docnum IN @s_docnum
+      AND series IN @s_series
+      AND docdat IN @s_docdat.
+  SORT lt_all_nfdoc BY nfenum series.
+
+  SELECT edoc_guid FROM y0033fi_icm_edoc
+    INTO TABLE @DATA(lt_edoc_known)
+    FOR ALL ENTRIES IN @lt_edoc
+    WHERE edoc_guid = @lt_edoc-edoc_guid.
+  SORT lt_edoc_known BY table_line.
+
+  SELECT * FROM y0033fi_icm_lane
+    INTO TABLE @DATA(lt_lane_all).
+
+  DATA lt_candidates LIKE lt_all_nfdoc.
+
   LOOP AT lt_edoc INTO DATA(ls_edoc).
 
-    READ TABLE lt_inc INTO DATA(ls_inc) WITH KEY edoc_guid = ls_edoc-edoc_guid.
+    READ TABLE lt_inc INTO DATA(ls_inc) WITH KEY edoc_guid = ls_edoc-edoc_guid BINARY SEARCH.
     IF sy-subrc <> 0.
       CONTINUE. " no EDOBRINCOMING row yet - covered by the "orphan" gap noted in the DDIC spec, not this form
     ENDIF.
+
+    READ TABLE lt_edoc_known WITH KEY table_line = ls_edoc-edoc_guid TRANSPORTING NO FIELDS BINARY SEARCH.
+    DATA(lv_already_known) = xsdbool( sy-subrc = 0 ).
 
     " Resolve DOCNUM - cardinality must be exactly 1.
     " DIRECT = 1 (Incoming) is required: both the issuing plant and
@@ -313,16 +360,10 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     " fiscal, in opposite directions - without this filter, the
     " NFENUM+SERIES match would routinely return 2 candidates instead
     " of 1, even for a perfectly normal transfer.
-    SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel
-      FROM j_1bnfdoc
-      INTO TABLE @DATA(lt_candidates)
-      WHERE nfenum = @ls_inc-nfenum
-        AND series = @ls_inc-series
-        AND bukrs  = @pu_bukrs
-        AND direct = '1'
-        AND docnum IN @s_docnum
-        AND series IN @s_series
-        AND docdat IN @s_docdat.
+    CLEAR lt_candidates.
+    LOOP AT lt_all_nfdoc INTO DATA(ls_nfdoc_row) WHERE nfenum = ls_inc-nfenum AND series = ls_inc-series.
+      APPEND ls_nfdoc_row TO lt_candidates.
+    ENDLOOP.
 
     DATA lv_match_count TYPE n LENGTH 1.
     lv_match_count = COND #( WHEN lines( lt_candidates ) > 9 THEN 9 ELSE lines( lt_candidates ) ).
@@ -331,7 +372,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
       " STATUS = LINK_ERROR, no candidate - see FORM SYNC_EDOC_TRACKING
       " for the row upsert logic; a lightweight upsert here too so the
       " problem is visible immediately, not only after the next sync.
-      PERFORM upsert_edoc_link_error USING ls_edoc-edoc_guid ls_inc lv_match_count ls_edoc-process ls_edoc-proc_status ls_inc-accesskey.
+      PERFORM upsert_edoc_link_error USING ls_edoc-edoc_guid ls_inc lv_match_count ls_edoc-process ls_edoc-proc_status ls_inc-accesskey lv_already_known.
       CONTINUE.
     ENDIF.
 
@@ -340,7 +381,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     " Track this GUID now, regardless of whether it ends up eligible
     " (lane match below) - Y0033FI_ICM_EDOC records every GUID we have
     " successfully linked, not only the ones that became candidates.
-    PERFORM upsert_edoc_active USING ls_edoc-edoc_guid ls_nfdoc-docnum ls_inc ls_edoc-process ls_edoc-proc_status ls_inc-accesskey.
+    PERFORM upsert_edoc_active USING ls_edoc-edoc_guid ls_nfdoc-docnum ls_inc ls_edoc-process ls_edoc-proc_status ls_inc-accesskey lv_already_known.
 
     CHECK ls_nfdoc-nfenum IN lt_nfenum. " S_NFENUM filter (screen selection, zero-padded above) - applies only to what becomes visible, not to tracking above
 
@@ -358,7 +399,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     DATA lv_dest   TYPE t005u-bland.
     DATA lv_level  TYPE n LENGTH 1.
     DATA lv_lane_subrc TYPE sy-subrc.
-    PERFORM match_lane USING ls_lane_key
+    PERFORM match_lane USING ls_lane_key lt_lane_all
                      CHANGING lv_origin lv_dest lv_level lv_lane_subrc.
 
     IF lv_lane_subrc <> 0.
@@ -386,6 +427,13 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
 
   ENDLOOP.
 
+  " Single commit for every UPSERT_EDOC_ACTIVE/UPSERT_EDOC_LINK_ERROR
+  " done above - those used to COMMIT WORK AND WAIT on every single
+  " row themselves (a synchronous round trip per row, waiting for the
+  " database to confirm each one), by far the single biggest cost in a
+  " search with any real number of eDocuments.
+  COMMIT WORK AND WAIT.
+
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -398,12 +446,15 @@ FORM upsert_edoc_link_error USING pu_edoc_guid TYPE char32
                                    pu_match_count TYPE n
                                    pu_process   TYPE char10
                                    pu_status    TYPE char10
-                                   pu_accesskey TYPE char44.
+                                   pu_accesskey TYPE char44
+                                   pu_already_known TYPE abap_bool.
 
-  SELECT SINGLE @abap_true FROM y0033fi_icm_edoc INTO @DATA(lv_exists)
-    WHERE edoc_guid = @pu_edoc_guid.
-
-  IF sy-subrc = 0.
+  " PU_ALREADY_KNOWN comes from a single bulk lookup the caller
+  " (SELECT_CANDIDATE_DOCUMENTS) already did for every eDocument in
+  " this run, instead of this FORM running its own SELECT SINGLE on
+  " every call - see that FORM for why. COMMIT WORK AND WAIT also
+  " moved there (once for the whole run, not once per call here).
+  IF pu_already_known = abap_true.
     UPDATE y0033fi_icm_edoc SET match_count    = @pu_match_count,
                                 accesskey      = @pu_accesskey,
                                 status         = @gc_edoc_status-link_error,
@@ -423,7 +474,6 @@ FORM upsert_edoc_link_error USING pu_edoc_guid TYPE char32
       last_seen_date  = sy-datum
       last_seen_time  = sy-uzeit ) ).
   ENDIF.
-  COMMIT WORK AND WAIT.
 
 ENDFORM.
 
@@ -440,12 +490,11 @@ FORM upsert_edoc_active USING pu_edoc_guid TYPE char32
                                pu_inc       TYPE any
                                pu_process   TYPE char10
                                pu_status    TYPE char10
-                               pu_accesskey TYPE char44.
+                               pu_accesskey TYPE char44
+                               pu_already_known TYPE abap_bool.
 
-  SELECT SINGLE @abap_true FROM y0033fi_icm_edoc INTO @DATA(lv_exists)
-    WHERE edoc_guid = @pu_edoc_guid.
-
-  IF sy-subrc = 0.
+  " Same reasoning as UPSERT_EDOC_LINK_ERROR above.
+  IF pu_already_known = abap_true.
     UPDATE y0033fi_icm_edoc SET docnum         = @pu_docnum,
                                 match_count    = 1,
                                 accesskey      = @pu_accesskey,
@@ -467,7 +516,6 @@ FORM upsert_edoc_active USING pu_edoc_guid TYPE char32
       last_seen_date  = sy-datum
       last_seen_time  = sy-uzeit ) ).
   ENDIF.
-  COMMIT WORK AND WAIT.
 
 ENDFORM.
 

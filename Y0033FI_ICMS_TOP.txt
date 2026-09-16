@@ -249,6 +249,13 @@ TYPES:
     plant_region  TYPE t005u-bland,
   END OF ty_lane_key.
 
+* Used by FORM MATCH_LANE (Y0033FI_ICMS_F01) - the caller
+* (SELECT_CANDIDATE_DOCUMENTS) reads Y0033FI_ICM_LANE once into this
+* type and passes it in, instead of MATCH_LANE re-reading the table on
+* every call (it used to, once per candidate row - one of the main
+* causes of a slow search with many eDocuments).
+TYPES ty_it_lane TYPE STANDARD TABLE OF y0033fi_icm_lane WITH DEFAULT KEY.
+
 *&---------------------------------------------------------------------*
 *& Global data (shared)
 *&---------------------------------------------------------------------*
