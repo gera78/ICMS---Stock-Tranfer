@@ -376,8 +376,13 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
                                 buzei_fi = @ls_buzei-buzei,
                                 bldat_fi = @lv_bldat,
                                 budat_fi = @lv_budat,
-                                period_fallback = @lv_fallback
+                                period_fallback = @lv_fallback,
+                                msg      = @space
       WHERE docnum = @ls_it-docnum AND itmnum = @ls_it-itmnum AND seqnr = @ls_it-seqnr.
+    " Clears any MSG left over from a previous failed attempt
+    " (POST_FAILED) - now that this cycle succeeded, the item looks
+    " like it still has a pending error otherwise. The full history
+    " (including that earlier failure) stays in Y0033FI_ICM_LOG.
 
     ls_it-belnr_fi = lv_belnr.
     ls_it-gjahr_fi = lv_gjahr.
