@@ -282,9 +282,18 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
     CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
 
     " Period-closed heuristic: message class F5, number 053 is the
-    " standard "posting period not open" error. Retry once with
-    " BUDAT = today, which is virtually always in an open period.
-    IF ls_err-id = 'F5' AND ls_err-number = '053' AND lv_fallback = abap_false.
+    " standard "posting period not open" error. Retry immediately (same
+    " run, not the next background cycle) with BUDAT = today, which is
+    " virtually always in an open period.
+    "
+    " Search the WHOLE LT_RETURN table for F5/053, not just LS_ERR (the
+    " primary error message used above for the POST_FAILED log/MSG) -
+    " BAPI_ACC_DOCUMENT_POST commonly wraps the real cause behind a
+    " generic "Error in document: BKPFF ..." message that also comes
+    " back as TYPE E, and when THAT one lands first in the table (very
+    " common), LS_ERR held it instead of the real F5/053 entry, so this
+    " check silently never matched and the retry never happened.
+    IF lv_fallback = abap_false AND line_exists( lt_return[ id = 'F5' number = '053' ] ).
       lv_budat    = sy-datum.
       lv_fallback = abap_true.
       CONTINUE.
