@@ -8,6 +8,31 @@
 *&---------------------------------------------------------------------*
 
 *&---------------------------------------------------------------------*
+*&      Form  CHECK_BUKRS_AUTHORITY
+*&---------------------------------------------------------------------*
+* Company-code authorization gate, via the standard FI object
+* F_BKPF_BUK (the same one real posting/reversal transactions check),
+* ACTVT 03 (Display) - the minimum needed to work with this company's
+* data in this program at all (search, view, approve, post, reverse).
+* Without this, any user able to run the program could act on ANY
+* company code typed into P_BUKRS, regardless of their real FI
+* authorization. Called from every entry point that validates P_BUKRS
+* (both main programs' selection screens and their START-OF-SELECTION
+* background safety net), right next to the existing "Enter a Company
+* Code" check.
+*---------------------------------------------------------------------*
+FORM check_bukrs_authority USING pu_bukrs TYPE bukrs.
+
+  AUTHORITY-CHECK OBJECT 'F_BKPF_BUK'
+    ID 'BUKRS' FIELD pu_bukrs
+    ID 'ACTVT' FIELD '03'.
+  IF sy-subrc <> 0.
+    MESSAGE |No FI authorization for company code { pu_bukrs }| TYPE 'E'.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  GET_COMPANY_CURRENCY
 *&---------------------------------------------------------------------*
 FORM get_company_currency USING pu_bukrs TYPE bukrs

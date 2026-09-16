@@ -171,9 +171,13 @@ AT SELECTION-SCREEN OUTPUT.
 
 AT SELECTION-SCREEN.
 * ONLI = the user pressed Execute (F8), not just clicked a radio
-* button/checkbox - only THEN is P_BUKRS actually required.
-  IF sy-ucomm = 'ONLI' AND p_bukrs IS INITIAL.
-    MESSAGE 'Enter a Company Code' TYPE 'E'.
+* button/checkbox - only THEN is P_BUKRS actually required (and its
+* authorization worth checking).
+  IF sy-ucomm = 'ONLI'.
+    IF p_bukrs IS INITIAL.
+      MESSAGE 'Enter a Company Code' TYPE 'E'.
+    ENDIF.
+    PERFORM check_bukrs_authority USING p_bukrs.
   ENDIF.
 
 * "Master" checkboxes (B3B) - group-toggle the real filter checkboxes

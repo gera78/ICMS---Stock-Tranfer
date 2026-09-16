@@ -28,6 +28,7 @@ START-OF-SELECTION.
   IF p_bukrs IS INITIAL.
     MESSAGE 'Enter a Company Code' TYPE 'E'.
   ENDIF.
+  PERFORM check_bukrs_authority USING p_bukrs.
 
   PERFORM get_company_currency USING p_bukrs CHANGING gv_waers.
   PERFORM get_params USING p_bukrs.
