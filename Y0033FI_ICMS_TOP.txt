@@ -8,7 +8,8 @@
 
 TYPE-POOLS: icon.  " ICON_LED_GREEN and friends, used by BUILD_STATUS_ICONS in Y0033FI_ICMS_F01
 
-TABLES: j_1bnfdoc.
+TABLES: j_1bnfdoc,
+        y0033fi_icm_edoc.  " needed only so S_ACCKEY (screens USR/ADM) can do SELECT-OPTIONS ... FOR y0033fi_icm_edoc-accesskey
 
 *&---------------------------------------------------------------------*
 *& Constants
@@ -144,7 +145,6 @@ TYPES:
     werks_orig   TYPE werks_d,           " not currently populated - no confirmed source field
     werks_dest   TYPE werks_d,           " from EDOBRINCOMING-PLANT
     edoc_guid    TYPE char32,            " eDocument GUID used as source for this cycle (fixed evidence)
-    accesskey    TYPE char44,            " NF-e access key, cross-check evidence only
     materialdoc  TYPE char10,            " informative only, not used for matching
     materialdoc_year TYPE n LENGTH 4,    " informative only, not used for matching
     matnr        TYPE j_1bnflin-matnr,

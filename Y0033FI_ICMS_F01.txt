@@ -238,8 +238,14 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     FROM edobrincoming
     INTO TABLE @DATA(lt_inc)
     FOR ALL ENTRIES IN @lt_edoc
-    WHERE edoc_guid = @lt_edoc-edoc_guid
-      AND accesskey IN @s_acckey.
+    WHERE edoc_guid    = @lt_edoc-edoc_guid
+      AND accesskey    IN @s_acckey
+      AND company_code = @pu_bukrs.
+  " COMPANY_CODE filter added so a search only tracks (Y0033FI_ICM_EDOC)
+  " eDocuments belonging to the company being searched - EDOCUMENT above
+  " has no BUKRS field, so without this every run would otherwise walk
+  " every company's eDocuments in the date range and write a row for
+  " each one, not just the ones relevant to PU_BUKRS.
 
   LOOP AT lt_edoc INTO DATA(ls_edoc).
 
@@ -272,7 +278,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
       " STATUS = LINK_ERROR, no candidate - see FORM SYNC_EDOC_TRACKING
       " for the row upsert logic; a lightweight upsert here too so the
       " problem is visible immediately, not only after the next sync.
-      PERFORM upsert_edoc_link_error USING ls_edoc-edoc_guid ls_inc lv_match_count ls_edoc-process ls_edoc-proc_status.
+      PERFORM upsert_edoc_link_error USING ls_edoc-edoc_guid ls_inc lv_match_count ls_edoc-process ls_edoc-proc_status ls_inc-accesskey.
       CONTINUE.
     ENDIF.
 
@@ -281,7 +287,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     " Track this GUID now, regardless of whether it ends up eligible
     " (lane match below) - Y0033FI_ICM_EDOC records every GUID we have
     " successfully linked, not only the ones that became candidates.
-    PERFORM upsert_edoc_active USING ls_edoc-edoc_guid ls_nfdoc-docnum ls_inc ls_edoc-process ls_edoc-proc_status.
+    PERFORM upsert_edoc_active USING ls_edoc-edoc_guid ls_nfdoc-docnum ls_inc ls_edoc-process ls_edoc-proc_status ls_inc-accesskey.
 
     CHECK ls_nfdoc-nfenum IN lt_nfenum. " S_NFENUM filter (screen selection, zero-padded above) - applies only to what becomes visible, not to tracking above
 
@@ -320,7 +326,6 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     gwa_item-lane_match_level = lv_level.
     gwa_item-werks_dest  = ls_inc-plant.
     gwa_item-edoc_guid   = ls_edoc-edoc_guid.
-    gwa_item-accesskey   = ls_inc-accesskey.
     gwa_item-materialdoc = ls_inc-materialdoc.
     gwa_item-materialdoc_year = ls_inc-materialdoc_year.
 
@@ -339,13 +344,15 @@ FORM upsert_edoc_link_error USING pu_edoc_guid TYPE char32
                                    pu_inc       TYPE any
                                    pu_match_count TYPE n
                                    pu_process   TYPE char10
-                                   pu_status    TYPE char10.
+                                   pu_status    TYPE char10
+                                   pu_accesskey TYPE char44.
 
   SELECT SINGLE @abap_true FROM y0033fi_icm_edoc INTO @DATA(lv_exists)
     WHERE edoc_guid = @pu_edoc_guid.
 
   IF sy-subrc = 0.
     UPDATE y0033fi_icm_edoc SET match_count    = @pu_match_count,
+                                accesskey      = @pu_accesskey,
                                 status         = @gc_edoc_status-link_error,
                                 last_seen_date = @sy-datum,
                                 last_seen_time = @sy-uzeit
@@ -354,6 +361,7 @@ FORM upsert_edoc_link_error USING pu_edoc_guid TYPE char32
     INSERT y0033fi_icm_edoc FROM @( VALUE #(
       edoc_guid       = pu_edoc_guid
       match_count     = pu_match_count
+      accesskey       = pu_accesskey
       edoc_process    = pu_process
       edoc_status     = pu_status
       status          = gc_edoc_status-link_error
@@ -378,7 +386,8 @@ FORM upsert_edoc_active USING pu_edoc_guid TYPE char32
                                pu_docnum    TYPE j_1bnfdoc-docnum
                                pu_inc       TYPE any
                                pu_process   TYPE char10
-                               pu_status    TYPE char10.
+                               pu_status    TYPE char10
+                               pu_accesskey TYPE char44.
 
   SELECT SINGLE @abap_true FROM y0033fi_icm_edoc INTO @DATA(lv_exists)
     WHERE edoc_guid = @pu_edoc_guid.
@@ -386,6 +395,7 @@ FORM upsert_edoc_active USING pu_edoc_guid TYPE char32
   IF sy-subrc = 0.
     UPDATE y0033fi_icm_edoc SET docnum         = @pu_docnum,
                                 match_count    = 1,
+                                accesskey      = @pu_accesskey,
                                 status         = @gc_edoc_status-active,
                                 last_seen_date = @sy-datum,
                                 last_seen_time = @sy-uzeit
@@ -395,6 +405,7 @@ FORM upsert_edoc_active USING pu_edoc_guid TYPE char32
       edoc_guid       = pu_edoc_guid
       docnum          = pu_docnum
       match_count     = 1
+      accesskey       = pu_accesskey
       edoc_process    = pu_process
       edoc_status     = pu_status
       status          = gc_edoc_status-active
@@ -1532,6 +1543,27 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
   DATA(lt_nfenum) = s_nfenum[].
   PERFORM pad_nfenum_range CHANGING lt_nfenum.
 
+  " ACCESSKEY no longer lives on Y0033FI_ICM_ITEM (moved to
+  " Y0033FI_ICM_EDOC, its natural 1:1 owner) - resolve S_ACCKEY into a
+  " GUID range first, then filter ITEM by EDOC_GUID. An empty range
+  " table imposes no restriction, matching the "no filter entered" case;
+  " a non-empty S_ACCKEY that matches zero eDocuments must return zero
+  " items too, so that case is handled explicitly below instead of
+  " falling through to "no restriction".
+  TYPES ty_r_guid TYPE RANGE OF char32.
+  DATA lr_guid_acckey TYPE ty_r_guid.
+  IF s_acckey[] IS NOT INITIAL.
+    SELECT edoc_guid FROM y0033fi_icm_edoc
+      INTO TABLE @DATA(lt_guid_acckey)
+      WHERE accesskey IN @s_acckey.
+    IF lt_guid_acckey IS INITIAL.
+      CLEAR git_item.
+      RETURN.
+    ENDIF.
+    lr_guid_acckey = VALUE #( FOR ls_guid IN lt_guid_acckey
+                               ( sign = 'I' option = 'EQ' low = ls_guid ) ).
+  ENDIF.
+
   SELECT * FROM y0033fi_icm_item
     INTO TABLE @lt_db
     WHERE bukrs      = @pu_bukrs
@@ -1539,7 +1571,7 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
       AND nfenum     IN @lt_nfenum
       AND docnum     IN @s_docnum
       AND series     IN @s_series
-      AND accesskey  IN @s_acckey
+      AND edoc_guid  IN @lr_guid_acckey
       AND budat_fi   IN @s_lcto.
 
   CLEAR git_item.
