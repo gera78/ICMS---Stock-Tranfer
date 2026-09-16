@@ -1302,8 +1302,14 @@ FORM delete_candidates.
       CONTINUE.
     ENDIF.
 
+    " STATUS = CANDIDATE in the WHERE guards against a stale grid: if
+    " another session already moved this item on (e.g. approved it)
+    " since this screen last refreshed, SY-SUBRC comes back <> 0 below
+    " and nothing is deleted/logged, instead of blindly deleting
+    " whatever the key still points to.
     DELETE FROM y0033fi_icm_item
-      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr.
+      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr
+        AND status = @gc_status-candidate.
     IF sy-subrc = 0.
       PERFORM write_log USING ls_sel gc_action-candidate_deleted gc_status-candidate '000'
                                'Candidate deleted by user'.
@@ -1447,11 +1453,17 @@ FORM approve_candidates.
       CONTINUE.
     ENDIF.
 
+    " STATUS = CANDIDATE in the WHERE guards against a stale grid: if
+    " another session already approved (or otherwise moved) this item
+    " since this screen last refreshed, SY-SUBRC comes back <> 0 below
+    " and APR_USER/APR_DATE/the log are left untouched, instead of
+    " silently overwriting who/when it was really approved.
     UPDATE y0033fi_icm_item SET status   = @gc_status-approved,
                                 apr_user = @sy-uname,
                                 apr_date = @sy-datum,
                                 apr_time = @sy-uzeit
-      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr.
+      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr
+        AND status = @gc_status-candidate.
 
     IF sy-subrc = 0.
       PERFORM write_log USING ls_sel gc_action-approved gc_status-candidate gc_status-approved
@@ -1498,12 +1510,22 @@ FORM request_reversal.
                                      THEN gc_trigger-nf_canceled
                                      ELSE gc_trigger-manual ).
 
+    " STATUS = LS_SEL-STATUS (the exact source status this screen last
+    " saw - POSTED or CANCEL_DETECTED) guards against a stale grid: if
+    " another session already moved this item on since then, SY-SUBRC
+    " comes back <> 0 below and nothing is changed/logged. Matching the
+    " exact remembered status (not just "still one of the two valid
+    " ones") also protects LV_TRIGGER above, which was picked from that
+    " same snapshot - if the real status flipped between POSTED and
+    " CANCEL_DETECTED in the meantime, a future refresh will record the
+    " correct trigger instead of a stale/wrong one.
     UPDATE y0033fi_icm_item SET status        = @gc_status-reversal_requested,
                                 reversal_trigger  = @lv_trigger,
                                 reversal_req_user = @sy-uname,
                                 reversal_req_date = @sy-datum,
                                 reversal_req_time = @sy-uzeit
-      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr.
+      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr
+        AND status = @ls_sel-status.
 
     IF sy-subrc = 0.
       DATA lv_msg_rev TYPE char200.
