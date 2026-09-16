@@ -27,7 +27,7 @@ SELECT-OPTIONS:
   s_acckey FOR y0033fi_icm_edoc-accesskey,      " NF-e access key (44 digits) - typed against Y0033FI_ICM_EDOC-ACCESSKEY (CHAR44), not the source table directly: EDOBRINCOMING-ACCESSKEY is TYPE STRING, which selection-screen fields can't use
 * S_LCTO only applies in view mode - nothing is posted yet in search
 * mode, so it is hidden there (same MODIF ID FV as the status filter).
-  s_lcto   FOR sy-datum MODIF ID fv.
+  s_lcto   FOR sy-datum MODIF ID fv,
 * TODO (Q5/Q8): reference date for selection still pending - uses
 * nota fiscal issue date for now.
 * Action Date - view mode only (same MODIF ID FV). Distinct from

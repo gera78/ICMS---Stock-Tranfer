@@ -28,7 +28,7 @@ SELECT-OPTIONS:
   s_acckey FOR y0033fi_icm_edoc-accesskey,      " NF-e access key (44 digits) - typed against Y0033FI_ICM_EDOC-ACCESSKEY (CHAR44), not the source table directly: EDOBRINCOMING-ACCESSKEY is TYPE STRING, which selection-screen fields can't use
 * S_LCTO only applies in view/admin-review mode - nothing is posted
 * yet in search mode, so it is hidden there.
-  s_lcto   FOR sy-datum MODIF ID fv.
+  s_lcto   FOR sy-datum MODIF ID fv,
 * Action Date - view/admin-review mode only (same MODIF ID FV).
 * Distinct from S_DATUM (eDocument creation date) and S_LCTO (BUDAT_FI,
 * the posting accounting date, which is not reliable for "posted on
