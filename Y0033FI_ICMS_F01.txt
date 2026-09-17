@@ -2166,6 +2166,15 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
     ENDLOOP.
   ENDIF.
 
+* NICE TO HAVE: for transfer-flow items (SELECT_TRANSFER_CANDIDATES),
+* EDOC_GUID is saved blank (that flow has no eDocument dependency) and
+* only ever resolved here, in memory, for display - if the inbound
+* eDocument for the same DOCNUM only shows up later (plausible, given
+* the two flows run independently), the persisted Y0033FI_ICM_ITEM
+* row never gets backfilled, only what's shown on screen. Low
+* priority: EDOC_GUID was never this flow's identity/traceability key
+* (DOCNUM+ITMNUM+SEQNR is), so this only matters if something outside
+* this program's own screens reads EDOC_GUID directly off the table.
   LOOP AT git_item INTO gwa_item.
     DATA(lv_tabix) = sy-tabix.
     DATA lv_latest_guid TYPE char32.
