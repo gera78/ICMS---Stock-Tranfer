@@ -31,7 +31,8 @@ DATA:
   gv_doc_type     TYPE blart,
   gv_edoc_type    TYPE char10,
   gv_program_id   TYPE char30,
-  gv_transfer_cfop TYPE char10. " CFOP identifying the intercompany transfer flow (SELECT_TRANSFER_CANDIDATES) - was GC_TRANSFER_CFOP, now maintained per BUKRS same as the fields above
+  gv_transfer_cfop   TYPE char10,          " CFOP identifying the intercompany transfer flow (SELECT_TRANSFER_CANDIDATES) - was GC_TRANSFER_CFOP, now maintained per BUKRS same as the fields above
+  gv_transfer_branch TYPE j_1bnfdoc-branch. " origin branch for the same flow - was GC_TRANSFER_BRANCH
 
 * eDocument PROC_STATUS values considered "Completed" for candidate
 * selection (source: EDOPROCSTATUS for EDOC_TYPE = BR_IN_ST).
@@ -99,13 +100,6 @@ CONSTANTS:
 DATA:
   gc_enable_search_edoc     TYPE abap_bool VALUE abap_true,
   gc_enable_search_transfer TYPE abap_bool VALUE abap_true.
-
-* TEMPORARY HARDCODED SELECTION CRITERION for SELECT_TRANSFER_CANDIDATES
-* (Y0033FI_ICMS_F01) - pending approval; if approved, move into a
-* maintainable config field too (same treatment GC_TRANSFER_CFOP just
-* got, see GV_TRANSFER_CFOP/GET_PARAMS above).
-CONSTANTS:
-  gc_transfer_branch TYPE j_1bnfdoc-branch VALUE '0006'. " origin branch that emits this flow's transfers - replaces the PARVW = 'BR' check
 
 * LOG-ACTION domain
 CONSTANTS:
