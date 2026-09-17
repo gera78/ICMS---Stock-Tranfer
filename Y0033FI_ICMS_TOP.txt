@@ -179,6 +179,7 @@ TYPES:
     matorg       TYPE j_1bnflin-matorg,
     mwskz        TYPE j_1bnflin-mwskz,  " tax code, per item - may be blank
     prctr        TYPE j_1bnflin-prctr,  " profit center, per item - may be blank
+    cfop         TYPE j_1bnflin-cfop,   " item's own CFOP - not saved until now, see READ_ITEMS_AND_ICMS
     menge        TYPE j_1bnflin-menge,
     menge_unit   TYPE meins,           " unit of measure - reference field for MENGE (QUAN type)
     netwr        TYPE j_1bnflin-netwr,

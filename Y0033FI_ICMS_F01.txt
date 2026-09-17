@@ -904,7 +904,7 @@ FORM read_items_and_icms.
 
   LOOP AT git_item INTO gwa_item.
 
-    SELECT itmnum, matnr, matorg, menge, meins, netwr, mwskz, prctr
+    SELECT itmnum, matnr, matorg, menge, meins, netwr, mwskz, prctr, cfop
       FROM j_1bnflin
       INTO TABLE @DATA(lt_lin)
       WHERE docnum = @gwa_item-docnum.
@@ -928,6 +928,7 @@ FORM read_items_and_icms.
       ls_out-netwr  = ls_lin-netwr.
       ls_out-mwskz  = ls_lin-mwskz.
       ls_out-prctr  = ls_lin-prctr.
+      ls_out-cfop   = ls_lin-cfop.
 
       IF lv_lines = 0.
         ls_out-status = gc_status-error.
@@ -1147,6 +1148,7 @@ FORM build_celltab.
           'ITMNUM'       TO lt_fieldnames,
           'SEQNR'        TO lt_fieldnames,
           'MATNR'        TO lt_fieldnames,
+          'CFOP'         TO lt_fieldnames,
           'ICMS_BASE'    TO lt_fieldnames,
           'ICMS_EXCBAS'  TO lt_fieldnames,
           'ICMS_OTHBAS'  TO lt_fieldnames,
@@ -2262,6 +2264,8 @@ FORM build_fieldcat USING pu_mode TYPE c.
   ls_fcat-ref_table  = 'MARA'.
   ls_fcat-ref_field  = 'MATNR'.
   APPEND ls_fcat TO gt_fcat.
+
+  add_field 'CFOP'        'CFOP'                8.
 
   add_field 'ICMS_BASE'   'ICMS Base'          16.
   add_field 'ICMS_EXCBAS' 'Excluded Base'      16.
