@@ -13,6 +13,14 @@
 *& admin program (P_MADM/P_MPARM/P_MLANE and the MAG1/MAG2 admin
 *& filter shortcuts) in its own blocks, since a SELECTION-SCREEN block
 *& opened here cannot be reopened there.
+*&
+*& INITIALIZATION/AT SELECTION-SCREEN OUTPUT/AT SELECTION-SCREEN can
+*& each only be coded ONCE per program (activation error otherwise:
+*& "the event ... was already specified"), so Y0033FI_ICMS_SCR_ADM
+*& cannot declare its own copies of these three - its extra logic runs
+*& through the dynamic PERFORM ('ADM_SCR_...') IF FOUND hooks below
+*& instead. That syntax compiles fine even in the plain user program,
+*& where those FORMs don't exist - IF FOUND just makes it a no-op there.
 *&---------------------------------------------------------------------*
 
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
@@ -223,6 +231,12 @@ INITIALIZATION.
 * touched a radio button and triggered MOD_CHG for the first time.
   PERFORM set_status_filter_defaults.
 
+* Admin-only hook - see the header comment above for why this can't
+* just be the admin program's own INITIALIZATION block. No-op (silent
+* skip) when this include is compiled standalone, since FORM
+* ADM_SCR_INIT then doesn't exist anywhere in the program.
+  PERFORM ('ADM_SCR_INIT') IF FOUND.
+
 AT SELECTION-SCREEN OUTPUT.
   LOOP AT SCREEN.
     IF screen-group1 = 'FS' AND p_mnew <> 'X'.
@@ -230,7 +244,7 @@ AT SELECTION-SCREEN OUTPUT.
       MODIFY SCREEN.
     ENDIF.
     IF screen-group1 = 'FV' AND p_mview <> 'X'.
-      screen-active = 0.  " hide entirely - only applies to view mode (also re-shown for admin review - see the admin program's own OUTPUT block, if this include is used there)
+      screen-active = 0.  " hide entirely - only applies to view mode (also re-shown for admin review - see ADM_SCR_OUTPUT below)
       MODIFY SCREEN.
     ENDIF.
     IF screen-group1 = 'MV' AND p_mview <> 'X'.
@@ -238,6 +252,9 @@ AT SELECTION-SCREEN OUTPUT.
       MODIFY SCREEN.
     ENDIF.
   ENDLOOP.
+
+* Admin-only hook - same reasoning as ADM_SCR_INIT above.
+  PERFORM ('ADM_SCR_OUTPUT') IF FOUND.
 
 AT SELECTION-SCREEN.
 * ONLI = the user pressed Execute (F8), not just clicked a radio
@@ -289,6 +306,11 @@ AT SELECTION-SCREEN.
                          AND p_ver = abap_true
                     THEN abap_true ELSE abap_false ).
 
+* Admin-only hook - same reasoning as ADM_SCR_INIT above. Handles
+* MOD_CHG2, MAG1/MAG2 and the P_MADM-specific status filter reset -
+* none of which this include knows anything about.
+  PERFORM ('ADM_SCR_EVENT') IF FOUND.
+
 *&---------------------------------------------------------------------*
 *&      Form  SET_STATUS_FILTER_DEFAULTS
 *&---------------------------------------------------------------------*
@@ -300,11 +322,12 @@ AT SELECTION-SCREEN.
 * MOD_CHG (every later mode switch).
 *
 * Only handles P_MNEW/P_MVIEW - the two modes this include itself
-* knows about. The admin program (Y0033FI_ICMS_SCR_ADM) calls this
-* FORM too (it is a no-op there whenever P_MADM/P_MPARM/P_MLANE is
-* selected, since neither branch matches), then applies its own
-* P_MADM-specific reset right after - see
-* SET_ADMIN_STATUS_FILTER_DEFAULTS there.
+* knows about. Called unconditionally above regardless of which
+* program is running; it is a no-op whenever P_MADM/P_MPARM/P_MLANE is
+* selected, since neither branch matches. The admin program applies
+* its own P_MADM-specific reset separately, via the ADM_SCR_INIT/
+* ADM_SCR_EVENT hooks above calling SET_ADM_STATUS_DEFAULTS
+* (Y0033FI_ICMS_SCR_ADM).
 *---------------------------------------------------------------------*
 FORM set_status_filter_defaults.
   IF p_mnew = 'X'.

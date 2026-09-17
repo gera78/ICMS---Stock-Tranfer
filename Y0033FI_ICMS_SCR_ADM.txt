@@ -26,8 +26,17 @@
 *& frames instead of one (Search/View in the shared frame, Admin
 *& Review/Parameters/Corridors right below in an untitled one), and
 *& keeping only one of the 5 radio buttons checked at a time is done
-*& by hand (AT SELECTION-SCREEN below), not by SAP automatically - see
-*& the comment on B2B.
+*& by hand (in FORM ADM_SCR_EVENT below), not by SAP automatically -
+*& see the comment on B2B.
+*&
+*& This include does NOT declare its own INITIALIZATION/AT
+*& SELECTION-SCREEN OUTPUT/AT SELECTION-SCREEN - each of those events
+*& may only be coded ONCE per program, and Y0033FI_ICMS_SCR_USR
+*& already owns all three (needed there for standalone use). Instead,
+*& this include's reactive logic lives in plain FORMs (ADM_SCR_INIT/
+*& ADM_SCR_OUTPUT/ADM_SCR_EVENT), which Y0033FI_ICMS_SCR_USR calls via
+*& PERFORM (...) IF FOUND - a dynamic call that compiles fine even in
+*& the plain user program, where these FORMs don't exist at all.
 *&---------------------------------------------------------------------*
 
 SELECTION-SCREEN BEGIN OF BLOCK b2b WITH FRAME.
@@ -39,12 +48,12 @@ SELECTION-SCREEN BEGIN OF BLOCK b2b WITH FRAME.
 * ("parameter of the radio button group already defined in block B2").
 *
 * Being a different group, SAP does NOT keep this mutually exclusive
-* with P_MNEW/P_MVIEW automatically - AT SELECTION-SCREEN below
-* clears one group's members whenever the other one changes, using
-* MOD_CHG2 (this group's own USER-COMMAND, on P_MADM) alongside
+* with P_MNEW/P_MVIEW automatically - FORM ADM_SCR_EVENT below clears
+* one group's members whenever the other one changes, using MOD_CHG2
+* (this group's own USER-COMMAND, on P_MADM) alongside
 * Y0033FI_ICMS_SCR_USR's existing MOD_CHG.
 PARAMETERS:
-  p_madm  RADIOBUTTON GROUP moda DEFAULT 'X' USER-COMMAND mod_chg2,   " admin review (original behavior) - this program's own default, see INITIALIZATION
+  p_madm  RADIOBUTTON GROUP moda DEFAULT 'X' USER-COMMAND mod_chg2,   " admin review (original behavior) - this program's own default, see FORM ADM_SCR_INIT
   p_mparm RADIOBUTTON GROUP moda,   " General Parameters (screen 400)
   p_mlane RADIOBUTTON GROUP moda.   " Maintain Corridors (screen 300)
 SELECTION-SCREEN END OF BLOCK b2b.
@@ -57,7 +66,7 @@ SELECTION-SCREEN BEGIN OF BLOCK b3c WITH FRAME.
 * block opened in one include cannot be reopened/extended from
 * another. MODIF ID MA (not MV, which B3B's own masters use) so each
 * mode's master checkboxes can be shown/hidden independently - see
-* AT SELECTION-SCREEN OUTPUT below.
+* FORM ADM_SCR_OUTPUT below.
 SELECTION-SCREEN BEGIN OF LINE.
 PARAMETERS p_mag1 TYPE char1 AS CHECKBOX DEFAULT 'X' USER-COMMAND mag1 MODIF ID ma.
 SELECTION-SCREEN COMMENT 4(60) c_mag1 MODIF ID ma.
@@ -68,11 +77,19 @@ SELECTION-SCREEN COMMENT 4(60) c_mag2 MODIF ID ma.
 SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN END OF BLOCK b3c.
 
-INITIALIZATION.
+*&---------------------------------------------------------------------*
+*&      Form  ADM_SCR_INIT
+*&---------------------------------------------------------------------*
+* Called from Y0033FI_ICMS_SCR_USR's INITIALIZATION via
+* PERFORM ('ADM_SCR_INIT') IF FOUND - see this include's own header
+* comment for why it can't just be this program's own INITIALIZATION.
+*---------------------------------------------------------------------*
+FORM adm_scr_init.
 * This program's own default mode, overriding Y0033FI_ICMS_SCR_USR's
-* own INITIALIZATION (P_MNEW), which already ran by this point
-* (include order) - preserves this program's original behavior
-* (admin review opens by default).
+* own INITIALIZATION (P_MNEW), which already ran by this point (it
+* calls this FORM at the very end of its own INITIALIZATION) -
+* preserves this program's original behavior (admin review opens by
+* default).
   p_mnew  = abap_false.
   p_mview = abap_false.
   p_madm  = abap_true.
@@ -80,9 +97,17 @@ INITIALIZATION.
   c_mag1 = 'Needs admin action (020, 025, 060)'.
   c_mag2 = 'Others (010, 015, 030, 040, 045, 050, 070, 990)'.
 
-  PERFORM set_admin_status_filter_defaults.
+  PERFORM set_adm_status_defaults.
+ENDFORM.
 
-AT SELECTION-SCREEN OUTPUT.
+*&---------------------------------------------------------------------*
+*&      Form  ADM_SCR_OUTPUT
+*&---------------------------------------------------------------------*
+* Called from Y0033FI_ICMS_SCR_USR's AT SELECTION-SCREEN OUTPUT via
+* PERFORM ('ADM_SCR_OUTPUT') IF FOUND - see this include's own header
+* comment.
+*---------------------------------------------------------------------*
+FORM adm_scr_output.
   LOOP AT SCREEN.
     IF screen-group1 = 'FV' AND p_madm = 'X'.
       screen-active = 1.  " admin review also uses the FV group (S_LCTO/S_ACTDAT + the 11 status checkboxes) - Y0033FI_ICMS_SCR_USR's own OUTPUT block only knows about P_MVIEW and already hid it based on that alone
@@ -93,10 +118,18 @@ AT SELECTION-SCREEN OUTPUT.
       MODIFY SCREEN.
     ENDIF.
   ENDLOOP.
+ENDFORM.
 
-AT SELECTION-SCREEN.
+*&---------------------------------------------------------------------*
+*&      Form  ADM_SCR_EVENT
+*&---------------------------------------------------------------------*
+* Called from Y0033FI_ICMS_SCR_USR's AT SELECTION-SCREEN via
+* PERFORM ('ADM_SCR_EVENT') IF FOUND - see this include's own header
+* comment.
+*---------------------------------------------------------------------*
+FORM adm_scr_event.
 * P_MNEW/P_MVIEW (group MOD, Y0033FI_ICMS_SCR_USR) and P_MADM/P_MPARM/
-* P_MLANE (group MODA, right above) are two INDEPENDENT RADIOBUTTON
+* P_MLANE (group MODA, B2B above) are two INDEPENDENT RADIOBUTTON
 * GROUPs (see the comment on B2B for why) - SAP keeps each group
 * mutually exclusive on its own, but does nothing to keep the two
 * groups exclusive OF EACH OTHER, so without this, switching from one
@@ -118,7 +151,7 @@ AT SELECTION-SCREEN.
       " this UCOMM, so the P_MADM-specific reset is applied here
       " instead (no-ops for P_MPARM/P_MLANE, which have no status
       " filter of their own - see the FORM itself).
-      PERFORM set_admin_status_filter_defaults.
+      PERFORM set_adm_status_defaults.
   ENDCASE.
 
 * "Master" checkboxes (B3C) - group-toggle the real filter checkboxes
@@ -136,25 +169,26 @@ AT SELECTION-SCREEN.
 * Keep both master checkboxes honest: recompute each from its actual
 * children on EVERY round trip (not just when the master itself was
 * clicked) - same reasoning as Y0033FI_ICMS_SCR_USR's own MVG1/MVG3/
-* MVG2 recompute, right below it in the combined event.
+* MVG2 recompute.
   p_mag1 = COND #( WHEN p_vap = abap_true AND p_vpf = abap_true AND p_vrr = abap_true
                     THEN abap_true ELSE abap_false ).
   p_mag2 = COND #( WHEN p_vca = abap_true AND p_vrj = abap_true AND p_vpg = abap_true
                          AND p_vcd = abap_true AND p_vpo = abap_true AND p_vrv = abap_true
                          AND p_ver = abap_true AND p_vcb = abap_true
                     THEN abap_true ELSE abap_false ).
+ENDFORM.
 
 *&---------------------------------------------------------------------*
-*&      Form  SET_ADMIN_STATUS_FILTER_DEFAULTS
+*&      Form  SET_ADM_STATUS_DEFAULTS
 *&---------------------------------------------------------------------*
 * The P_MADM-specific half of the status filter reset.
 * SET_STATUS_FILTER_DEFAULTS (Y0033FI_ICMS_SCR_USR) already handles
 * P_MNEW/P_MVIEW and is called unconditionally from both programs'
 * INITIALIZATION/MOD_CHG handling - this FORM only adds what that one
 * cannot know about (P_MADM doesn't exist in the plain user program),
-* called right after it.
+* called right after it (from ADM_SCR_INIT/ADM_SCR_EVENT above).
 *---------------------------------------------------------------------*
-FORM set_admin_status_filter_defaults.
+FORM set_adm_status_defaults.
   IF p_madm = 'X'.
     p_vap = abap_true.   p_vpf = abap_true.   p_vrr = abap_true.  " needs admin action (020, 025, 060)
     p_vca = abap_false.  p_vrj = abap_false.  p_vpg = abap_false.
