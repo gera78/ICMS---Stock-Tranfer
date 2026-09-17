@@ -32,6 +32,12 @@ MODULE user_command_0200 INPUT.
   go_alv->check_changed_data( ).
 
   CASE gv_ucomm.
+    WHEN 'SEL_ALL'.
+      PERFORM set_all_sel USING abap_true.
+      go_alv->refresh_table_display( ).
+    WHEN 'SEL_NONE'.
+      PERFORM set_all_sel USING abap_false.
+      go_alv->refresh_table_display( ).
     WHEN 'POST'.
       PERFORM post_released_items.
       LEAVE TO SCREEN 0. " re-run selection to reflect DB state
