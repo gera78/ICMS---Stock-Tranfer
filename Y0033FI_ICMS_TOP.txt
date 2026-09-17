@@ -99,16 +99,12 @@ DATA:
   gc_enable_search_edoc     TYPE abap_bool VALUE abap_true,
   gc_enable_search_transfer TYPE abap_bool VALUE abap_true.
 
-* TEMPORARY HARDCODED SELECTION CRITERIA for SELECT_TRANSFER_CANDIDATES
-* (Y0033FI_ICMS_F01) - pending approval; if approved, move both into a
-* maintainable config field (Y0033FI_ICM_PARM or a new table) instead
-* of a constant.
-* GC_TRANSFER_CFOP is typed CHAR10, not against J_1BNFLIN-CFOP
-* directly, so a length mismatch doesn't block activation - confirm
-* the real column length/format in SE16N before testing.
-CONSTANTS:
-  gc_transfer_branch TYPE j_1bnfdoc-branch VALUE '0006', " origin branch that emits this flow's transfers - replaces the PARVW = 'BR' check
-  gc_transfer_cfop   TYPE char10 VALUE '6152/AA'.        " CFOP a qualifying line item must have
+* NOTE: the intercompany-transfer flow's origin branch and CFOP are
+* NOT constants/config fields anymore - they're read straight out of
+* Y0033FI_ICM_LANE (VENDOR_CODE / TRANSFER_CFOP) by
+* SELECT_TRANSFER_CANDIDATES, same table that already decides
+* eligibility and benefit % for this flow. See that FORM's header
+* comment (Y0033FI_ICMS_F01) and TY_LANE_KEY above.
 
 * LOG-ACTION domain
 CONSTANTS:
@@ -277,6 +273,7 @@ TYPES:
     country       TYPE land1,
     plant_code    TYPE werks_d,
     plant_region  TYPE t005u-bland,
+    transfer_cfop TYPE char10, " 8th match field, blank = wildcard like the other 7 - CFOP identifying the intercompany transfer flow (SELECT_TRANSFER_CANDIDATES only; blank for the eDocument-driven flow, which never sets it)
   END OF ty_lane_key.
 
 * Used by FORM MATCH_LANE (Y0033FI_ICMS_F01) - the caller

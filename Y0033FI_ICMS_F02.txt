@@ -755,6 +755,7 @@ FORM build_lane_fieldcat.
   add_lane_field 'COUNTRY'       'Country'      8   'X'.
   add_lane_field 'PLANT_CODE'    'Plant Code'   12  'X'.
   add_lane_field 'PLANT_REGION'  'Plant UF'     10  'X'.
+  add_lane_field 'TRANSFER_CFOP' 'Transfer CFOP' 10 'X'.
   add_lane_field 'ORIGIN_REGION' 'Origin UF'    10  'X'.
   add_lane_field 'DEST_REGION'   'Dest. UF'     10  'X'.
   add_lane_field 'ACTIVE'        'Active'       6   'X'.
@@ -770,7 +771,7 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 *&      Form  CALC_MATCH_LEVEL
 *&---------------------------------------------------------------------*
-* MATCH_LEVEL = how many of the 7 key fields are non-blank. Called
+* MATCH_LEVEL = how many of the 8 key fields are non-blank. Called
 * automatically on save - never entered by hand (see FORM
 * BUILD_LANE_FIELDCAT, field is not editable in the grid).
 *---------------------------------------------------------------------*
@@ -785,6 +786,7 @@ FORM calc_match_level USING ps_lane TYPE y0033fi_icm_lane
   IF ps_lane-country       IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
   IF ps_lane-plant_code    IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
   IF ps_lane-plant_region  IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
+  IF ps_lane-transfer_cfop IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
 
   pc_level = lv_count.
 

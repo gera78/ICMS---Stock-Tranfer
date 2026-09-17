@@ -218,7 +218,8 @@ FORM match_lane USING pu_key      TYPE ty_lane_key
       AND ( vendor_region = pu_key-vendor_region OR vendor_region = space )
       AND ( country       = pu_key-country       OR country       = space )
       AND ( plant_code    = pu_key-plant_code    OR plant_code    = space )
-      AND ( plant_region  = pu_key-plant_region  OR plant_region  = space ).
+      AND ( plant_region  = pu_key-plant_region  OR plant_region  = space )
+      AND ( transfer_cfop = pu_key-transfer_cfop OR transfer_cfop = space ).
     APPEND ls_lane_row TO lt_lane.
   ENDLOOP.
 
@@ -478,26 +479,32 @@ ENDFORM.
 * Y0033FI_ICM_EDOC same as any other GUID, purely as a "confirmed
 * arrival" record; it never gates this candidate.
 *
-* "This flow" = J_1BNFDOC-BRANCH = GC_TRANSFER_BRANCH (a fixed, known
-* origin branch - Y0033FI_ICMS_TOP) AND at least one J_1BNFLIN item at
-* GC_TRANSFER_CFOP. Both hardcoded for now, pending approval - see the
-* constants' own comments; if approved, move them into a maintainable
-* config field instead. PARVW = 'BR' was tried first (the nota's
-* partner being one of our own business places) but was dropped in
-* favor of this simpler, explicit BRANCH+CFOP check.
+* "This flow" is decided entirely by Y0033FI_ICM_LANE now, the same
+* table that already decides eligibility/benefit % for this flow -
+* nothing hardcoded, nothing in a separate config table:
+*   - VENDOR_CODE (non-blank rows) lists the origin branches in scope
+*     - narrows the initial J_1BNFDOC-BRANCH read below.
+*   - TRANSFER_CFOP (non-blank rows) lists the qualifying CFOPs - an
+*     8th LANE match field (see TY_LANE_KEY, Y0033FI_ICMS_TOP), blank
+*     = wildcard like the other 7. Narrows the J_1BNFLIN read below,
+*     and the matched item's own CFOP feeds MATCH_LANE per document,
+*     so a lane can require a specific CFOP or accept any.
+* A LANE row with blank VENDOR_CODE/TRANSFER_CFOP still only matches
+* THIS flow if TRANSFER_CFOP is blank too (see MATCH_LANE) - existing
+* eDocument-flow rows (which never set TRANSFER_CFOP) are unaffected.
 *
-* PARID still encodes the destination branch, as BUKRS (no leading
-* zeros) + BRANCH - confirmed against a real document pair (BUKRS
-* 0033/BRANCH 0006, PARID '330005' pointing at branch 0005, same CNPJ
-* root 46.389.383 on both CGC and CNPJ_BUPLA, just a different branch
+* PARID encodes the destination branch, as BUKRS (no leading zeros) +
+* BRANCH - confirmed against a real document pair (BUKRS 0033/BRANCH
+* 0006, PARID '330005' pointing at branch 0005, same CNPJ root
+* 46.389.383 on both CGC and CNPJ_BUPLA, just a different branch
 * suffix). Taking the LAST 4 characters recovers BRANCH regardless of
 * how many digits BUKRS occupies - this was derived from a single
 * sample document, so confirm it still holds for a company code whose
 * BUKRS isn't "0033" before relying on it for real postings.
 *
-* MATCH_LANE itself is untouched - its 7 generic key fields are reused
-* with a different meaning for this flow (lane maintenance for these
-* rows keys on branch, not a real vendor):
+* MATCH_LANE itself is untouched - its other 7 generic key fields are
+* reused with a different meaning for this flow (lane maintenance for
+* these rows keys on branch, not a real vendor):
 *   VENDOR_CODE   = origin branch (this doc's own BRANCH)
 *   VENDOR_TAX_ID = origin CNPJ (CNPJ_BUPLA)
 *   VENDOR_REGION = blank - not on the header for the origin side;
@@ -510,6 +517,37 @@ ENDFORM.
 *---------------------------------------------------------------------*
 FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
 
+  DATA lt_lane_all TYPE ty_it_lane.
+  SELECT * FROM y0033fi_icm_lane
+    INTO TABLE @lt_lane_all.
+
+  " Candidate origin branches = every non-blank VENDOR_CODE configured
+  " for this BUKRS - narrows the J_1BNFDOC read below. A blank
+  " VENDOR_CODE (wildcard) can't narrow anything and is excluded here;
+  " it's still honored later, per document, by MATCH_LANE itself.
+  TYPES ty_r_branch TYPE RANGE OF j_1bnfdoc-branch.
+  DATA lr_branch TYPE ty_r_branch.
+  LOOP AT lt_lane_all INTO DATA(ls_lane_b)
+    WHERE bukrs = pu_bukrs AND vendor_code IS NOT INITIAL.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_lane_b-vendor_code ) TO lr_branch.
+  ENDLOOP.
+  SORT lr_branch.
+  DELETE ADJACENT DUPLICATES FROM lr_branch.
+  CHECK lr_branch IS NOT INITIAL. " nothing configured for this flow at this BUKRS
+
+  " Candidate CFOPs = every non-blank TRANSFER_CFOP configured for this
+  " BUKRS - narrows the J_1BNFLIN read below. Same wildcard reasoning
+  " as VENDOR_CODE above.
+  TYPES ty_r_cfop TYPE RANGE OF char10.
+  DATA lr_cfop TYPE ty_r_cfop.
+  LOOP AT lt_lane_all INTO DATA(ls_lane_c)
+    WHERE bukrs = pu_bukrs AND transfer_cfop IS NOT INITIAL.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_lane_c-transfer_cfop ) TO lr_cfop.
+  ENDLOOP.
+  SORT lr_cfop.
+  DELETE ADJACENT DUPLICATES FROM lr_cfop.
+  CHECK lr_cfop IS NOT INITIAL.
+
   DATA(lt_nfenum) = s_nfenum[].
   PERFORM pad_nfenum_range CHANGING lt_nfenum.
 
@@ -519,7 +557,7 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
     INTO TABLE @DATA(lt_transfer)
     WHERE bukrs  = @pu_bukrs
       AND direct = '2'
-      AND branch = @gc_transfer_branch
+      AND branch IN @lr_branch
       AND nfenum IN @lt_nfenum
       AND docnum IN @s_docnum
       AND series IN @s_series
@@ -527,32 +565,30 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
 
   CHECK lt_transfer IS NOT INITIAL.
 
-  " Only notas with at least one line item at the configured CFOP
-  " belong to this flow - see GC_TRANSFER_CFOP (Y0033FI_ICMS_TOP) for
-  " why this is hardcoded for now.
-  DATA lt_cfop_docnum TYPE STANDARD TABLE OF j_1bnflin-docnum WITH DEFAULT KEY.
-  SELECT DISTINCT docnum FROM j_1bnflin
-    INTO TABLE @lt_cfop_docnum
+  " Only notas with at least one line item at a configured CFOP belong
+  " to this flow - that item's own CFOP (not just its existence) feeds
+  " the LANE match below, one row per DOCNUM (first qualifying line
+  " wins if a nota mixes CFOPs - same "one match per document"
+  " simplification the rest of this FORM already relies on).
+  TYPES: BEGIN OF ty_cfop_hit,
+           docnum TYPE j_1bnflin-docnum,
+           cfop   TYPE j_1bnflin-cfop,
+         END OF ty_cfop_hit.
+  DATA lt_cfop_hit TYPE STANDARD TABLE OF ty_cfop_hit WITH DEFAULT KEY.
+  SELECT docnum, cfop FROM j_1bnflin
+    INTO TABLE @lt_cfop_hit
     FOR ALL ENTRIES IN @lt_transfer
     WHERE docnum = @lt_transfer-docnum
-      AND cfop   = @gc_transfer_cfop.
-  SORT lt_cfop_docnum BY table_line.
-
-  LOOP AT lt_transfer INTO DATA(ls_cfop_check).
-    READ TABLE lt_cfop_docnum WITH KEY table_line = ls_cfop_check-docnum
-      TRANSPORTING NO FIELDS BINARY SEARCH.
-    IF sy-subrc <> 0.
-      DELETE lt_transfer.
-    ENDIF.
-  ENDLOOP.
-
-  CHECK lt_transfer IS NOT INITIAL.
-
-  DATA lt_lane_all TYPE ty_it_lane.
-  SELECT * FROM y0033fi_icm_lane
-    INTO TABLE @lt_lane_all.
+      AND cfop   IN @lr_cfop.
+  SORT lt_cfop_hit BY docnum.
+  DELETE ADJACENT DUPLICATES FROM lt_cfop_hit COMPARING docnum.
 
   LOOP AT lt_transfer INTO DATA(ls_nfdoc).
+
+    READ TABLE lt_cfop_hit INTO DATA(ls_cfop_hit) WITH KEY docnum = ls_nfdoc-docnum BINARY SEARCH.
+    IF sy-subrc <> 0.
+      CONTINUE. " no qualifying CFOP line on this nota
+    ENDIF.
 
     " Destination branch = last 4 characters of PARID (see the header
     " comment on the BUKRS+BRANCH convention).
@@ -567,7 +603,8 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
       vendor_region = space
       country       = ls_nfdoc-land1
       plant_code    = lv_dest_branch
-      plant_region  = ls_nfdoc-regio ).
+      plant_region  = ls_nfdoc-regio
+      transfer_cfop = ls_cfop_hit-cfop ).
 
     DATA lv_origin TYPE t005u-bland.
     DATA lv_dest   TYPE t005u-bland.
