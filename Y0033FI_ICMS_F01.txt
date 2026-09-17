@@ -1172,8 +1172,13 @@ FORM build_celltab.
           'BUZEI_FI'     TO lt_fieldnames,
           'CRE_USER'     TO lt_fieldnames,
           'CRE_DATE'     TO lt_fieldnames,
+          'CRE_TIME'     TO lt_fieldnames,
           'APR_USER'     TO lt_fieldnames,
           'APR_DATE'     TO lt_fieldnames,
+          'APR_TIME'     TO lt_fieldnames,
+          'PST_USER'     TO lt_fieldnames,
+          'PST_DATE'     TO lt_fieldnames,
+          'PST_TIME'     TO lt_fieldnames,
           'REVERSAL_TRIGGER' TO lt_fieldnames,
           'MSG'          TO lt_fieldnames.
 
