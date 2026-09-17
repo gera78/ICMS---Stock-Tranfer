@@ -60,13 +60,17 @@ SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-b02.
 * (without it, AT SELECTION-SCREEN OUTPUT only reruns on the next
 * Enter/round trip, so the filter block below would not hide/show
 * right away).
-* No DEFAULT here - P_MNEW is this program's own default, but the
-* admin program (Y0033FI_ICMS_SCR_ADM) needs P_MADM to default on
-* instead, and a RADIOBUTTON GROUP only allows ONE member to carry
-* DEFAULT across the whole (combined) program. Each program sets its
-* own default explicitly in INITIALIZATION instead - see below.
+*
+* P_MADM/P_MPARM/P_MLANE (admin program only, Y0033FI_ICMS_SCR_ADM)
+* are NOT part of this RADIOBUTTON GROUP - SAP requires every member
+* of a group to be declared in the SAME SELECTION-SCREEN block, and
+* this one is opened and closed entirely here (it must be, since this
+* include is also used standalone, without the admin program's extra
+* modes). The admin program's own modes use a second, independent
+* group instead, kept in sync with this one by hand - see
+* Y0033FI_ICMS_SCR_ADM's own B2B block and its AT SELECTION-SCREEN.
 PARAMETERS:
-  p_mnew  RADIOBUTTON GROUP mod USER-COMMAND mod_chg,   " search new candidates
+  p_mnew  RADIOBUTTON GROUP mod DEFAULT 'X' USER-COMMAND mod_chg,   " search new candidates
   p_mview RADIOBUTTON GROUP mod.               " view my candidates
 SELECTION-SCREEN END OF BLOCK b2.
 
@@ -189,13 +193,6 @@ SELECTION-SCREEN END OF BLOCK b3b.
 
 INITIALIZATION.
   gv_id_exec = sy-uname && sy-datum && sy-uzeit.
-
-* This program's own default mode - see the comment above P_MNEW/
-* P_MVIEW (B2) for why this can't just be a PARAMETERS DEFAULT
-* anymore. The admin program overrides this to P_MADM in its own
-* INITIALIZATION, which runs after this one (include order).
-  p_mnew  = abap_true.
-  p_mview = abap_false.
 
 * Filter checkbox icons + "<code> - <description>" labels - same
 * icons/codes as BUILD_STATUS_ICONS/BUILD_STATUS_DESCR (Y0033FI_ICMS_F01).

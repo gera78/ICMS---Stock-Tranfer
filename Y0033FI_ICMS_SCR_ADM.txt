@@ -11,31 +11,42 @@
 *& which screen the program opens.
 *&
 *& This include holds ONLY what is exclusive to the admin program:
-*& P_MADM/P_MPARM/P_MLANE (added to the shared P_MNEW/P_MVIEW radio
-*& group declared in Y0033FI_ICMS_SCR_USR, which the main program
-*& includes BEFORE this one) and the MAG1/MAG2 admin filter
-*& shortcuts. Everything P_MNEW/P_MVIEW themselves need (P_BUKRS, the
-*& search/view filters, the 11 status checkboxes, MVG1/MVG3/MVG2) is
-*& declared once in Y0033FI_ICMS_SCR_USR and reused here as-is - see
-*& that include's own header comment. One visible side effect: the
-*& mode choice now renders as two frames instead of one (Search/View
-*& in the shared frame, Admin Review/Parameters/Corridors right below
-*& in an untitled one) - a SELECTION-SCREEN block opened in one
-*& include cannot be reopened/extended from another, so the 5 radio
-*& buttons can't share one visual box across the two files even though
-*& they are still one RADIOBUTTON GROUP (tied together by group name
-*& alone, not by physical block).
+*& P_MADM/P_MPARM/P_MLANE and the MAG1/MAG2 admin filter shortcuts.
+*& Everything P_MNEW/P_MVIEW themselves need (P_BUKRS, the search/view
+*& filters, the 11 status checkboxes, MVG1/MVG3/MVG2) is declared once
+*& in Y0033FI_ICMS_SCR_USR (which the main program includes BEFORE
+*& this one) and reused here as-is - see that include's own header
+*& comment.
+*&
+*& P_MADM/P_MPARM/P_MLANE are their OWN separate RADIOBUTTON GROUP
+*& (MODA), not part of Y0033FI_ICMS_SCR_USR's MOD group (P_MNEW/
+*& P_MVIEW) - SAP requires every member of a group to be declared in
+*& the same block, and MOD's block is already closed inside that
+*& include. Two visible side effects: the mode choice renders as two
+*& frames instead of one (Search/View in the shared frame, Admin
+*& Review/Parameters/Corridors right below in an untitled one), and
+*& keeping only one of the 5 radio buttons checked at a time is done
+*& by hand (AT SELECTION-SCREEN below), not by SAP automatically - see
+*& the comment on B2B.
 *&---------------------------------------------------------------------*
 
 SELECTION-SCREEN BEGIN OF BLOCK b2b WITH FRAME.
-* Continues RADIOBUTTON GROUP MOD started in Y0033FI_ICMS_SCR_USR
-* (P_MNEW/P_MVIEW). No DEFAULT here either, for the same reason
-* P_MNEW's own DEFAULT was removed there - see INITIALIZATION below
-* for how P_MADM becomes this program's actual default instead.
+* A SEPARATE RADIOBUTTON GROUP (MODA, not MOD) - SAP requires every
+* member of a group to live in the SAME block, and MOD's block (B2)
+* is already closed inside Y0033FI_ICMS_SCR_USR (needed there, since
+* that include is also used standalone without these extra modes) -
+* trying to add these three to MOD from here fails activation
+* ("parameter of the radio button group already defined in block B2").
+*
+* Being a different group, SAP does NOT keep this mutually exclusive
+* with P_MNEW/P_MVIEW automatically - AT SELECTION-SCREEN below
+* clears one group's members whenever the other one changes, using
+* MOD_CHG2 (this group's own USER-COMMAND, on P_MADM) alongside
+* Y0033FI_ICMS_SCR_USR's existing MOD_CHG.
 PARAMETERS:
-  p_madm  RADIOBUTTON GROUP mod,   " admin review (original behavior) - this program's own default, see INITIALIZATION
-  p_mparm RADIOBUTTON GROUP mod,   " General Parameters (screen 400)
-  p_mlane RADIOBUTTON GROUP mod.   " Maintain Corridors (screen 300)
+  p_madm  RADIOBUTTON GROUP moda DEFAULT 'X' USER-COMMAND mod_chg2,   " admin review (original behavior) - this program's own default, see INITIALIZATION
+  p_mparm RADIOBUTTON GROUP moda,   " General Parameters (screen 400)
+  p_mlane RADIOBUTTON GROUP moda.   " Maintain Corridors (screen 300)
 SELECTION-SCREEN END OF BLOCK b2b.
 
 SELECTION-SCREEN BEGIN OF BLOCK b3c WITH FRAME.
@@ -84,13 +95,31 @@ AT SELECTION-SCREEN OUTPUT.
   ENDLOOP.
 
 AT SELECTION-SCREEN.
-* Mode just switched to admin review - Y0033FI_ICMS_SCR_USR's own
-* MOD_CHG handling already ran (it calls SET_STATUS_FILTER_DEFAULTS
-* unconditionally, which no-ops for P_MADM since neither of its own
-* branches match) - this adds the P_MADM-specific reset on top.
-  IF sy-ucomm = 'MOD_CHG' AND p_madm = 'X'.
-    PERFORM set_admin_status_filter_defaults.
-  ENDIF.
+* P_MNEW/P_MVIEW (group MOD, Y0033FI_ICMS_SCR_USR) and P_MADM/P_MPARM/
+* P_MLANE (group MODA, right above) are two INDEPENDENT RADIOBUTTON
+* GROUPs (see the comment on B2B for why) - SAP keeps each group
+* mutually exclusive on its own, but does nothing to keep the two
+* groups exclusive OF EACH OTHER, so without this, switching from one
+* group to the other would leave both showing a checked radio at once.
+* MOD_CHG2 is MODA's own USER-COMMAND (on P_MADM, same idea as
+* Y0033FI_ICMS_SCR_USR's MOD_CHG on P_MNEW - fires for a click on any
+* member of that member's group).
+  CASE sy-ucomm.
+    WHEN 'MOD_CHG'.
+      " user switched within MOD (P_MNEW/P_MVIEW) - clear MODA.
+      p_madm  = abap_false.
+      p_mparm = abap_false.
+      p_mlane = abap_false.
+    WHEN 'MOD_CHG2'.
+      " user switched within MODA (P_MADM/P_MPARM/P_MLANE) - clear MOD.
+      p_mnew  = abap_false.
+      p_mview = abap_false.
+      " Y0033FI_ICMS_SCR_USR's own MOD_CHG handling doesn't run for
+      " this UCOMM, so the P_MADM-specific reset is applied here
+      " instead (no-ops for P_MPARM/P_MLANE, which have no status
+      " filter of their own - see the FORM itself).
+      PERFORM set_admin_status_filter_defaults.
+  ENDCASE.
 
 * "Master" checkboxes (B3C) - group-toggle the real filter checkboxes
 * when clicked. See the block comment above P_MAG1 for what each
