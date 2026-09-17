@@ -206,6 +206,14 @@ INITIALIZATION.
   c_mag1 = 'Needs admin action (020, 025, 060)'.
   c_mag2 = 'Others (010, 015, 030, 040, 045, 050, 070, 990)'.
 
+* Applied once here too, not just on MOD_CHG (see SET_STATUS_FILTER_DEFAULTS
+* below) - the individual filter checkboxes all carry PARAMETERS-level
+* DEFAULT 'X', so without this the very first screen display showed
+* every one of them checked regardless of which mode (P_MADM by
+* default) is actually selected, until the user touched a radio button
+* and triggered MOD_CHG for the first time.
+  PERFORM set_status_filter_defaults.
+
 AT SELECTION-SCREEN OUTPUT.
   LOOP AT SCREEN.
     IF screen-group1 = 'FS' AND p_mnew <> 'X'.
@@ -251,19 +259,7 @@ AT SELECTION-SCREEN.
 * made before switching away. P_MPARM/P_MLANE have no status filter of
 * their own, so nothing to reset there.
   IF sy-ucomm = 'MOD_CHG'.
-    IF p_mnew = 'X'.
-      p_sre = abap_true.  p_snc = abap_false.  p_ser = abap_false.
-    ELSEIF p_mview = 'X'.
-      p_vca = abap_true.   p_vcd = abap_true.                    " needs my action (010, 050)
-      p_vpo = abap_false.                                        " reversal (040) - off by default
-      p_vrj = abap_false.  p_vap = abap_false.  p_vpf = abap_false.  p_vcb = abap_false.
-      p_vpg = abap_false.  p_vrr = abap_false.  p_vrv = abap_false.  p_ver = abap_false. " others
-    ELSEIF p_madm = 'X'.
-      p_vap = abap_true.   p_vpf = abap_true.   p_vrr = abap_true.  " needs admin action (020, 025, 060)
-      p_vca = abap_false.  p_vrj = abap_false.  p_vpg = abap_false.
-      p_vcd = abap_false.  p_vpo = abap_false.  p_vrv = abap_false.  p_ver = abap_false.
-      p_vcb = abap_false.  " others (045 included - no admin action exists for Cancelled Before Posting)
-    ENDIF.
+    PERFORM set_status_filter_defaults.
   ENDIF.
 
 * "Master" checkboxes (B3B) - group-toggle the real filter checkboxes
@@ -304,3 +300,30 @@ AT SELECTION-SCREEN.
                          AND p_vcd = abap_true AND p_vpo = abap_true AND p_vrv = abap_true
                          AND p_ver = abap_true AND p_vcb = abap_true
                     THEN abap_true ELSE abap_false ).
+
+*&---------------------------------------------------------------------*
+*&      Form  SET_STATUS_FILTER_DEFAULTS
+*&---------------------------------------------------------------------*
+* Resets the per-status filter checkboxes (B3B) to the current mode's
+* default set. Called both from INITIALIZATION (so the very first
+* screen display already matches the default mode, P_MADM, instead of
+* showing every checkbox checked - their PARAMETERS-level DEFAULT 'X'
+* only makes sense as a safe fallback) and from AT SELECTION-SCREEN on
+* MOD_CHG (every later mode switch). P_MPARM/P_MLANE have no status
+* filter of their own, so nothing to reset for them.
+*---------------------------------------------------------------------*
+FORM set_status_filter_defaults.
+  IF p_mnew = 'X'.
+    p_sre = abap_true.  p_snc = abap_false.  p_ser = abap_false.
+  ELSEIF p_mview = 'X'.
+    p_vca = abap_true.   p_vcd = abap_true.                    " needs my action (010, 050)
+    p_vpo = abap_false.                                        " reversal (040) - off by default
+    p_vrj = abap_false.  p_vap = abap_false.  p_vpf = abap_false.  p_vcb = abap_false.
+    p_vpg = abap_false.  p_vrr = abap_false.  p_vrv = abap_false.  p_ver = abap_false. " others
+  ELSEIF p_madm = 'X'.
+    p_vap = abap_true.   p_vpf = abap_true.   p_vrr = abap_true.  " needs admin action (020, 025, 060)
+    p_vca = abap_false.  p_vrj = abap_false.  p_vpg = abap_false.
+    p_vcd = abap_false.  p_vpo = abap_false.  p_vrv = abap_false.  p_ver = abap_false.
+    p_vcb = abap_false.  " others (045 included - no admin action exists for Cancelled Before Posting)
+  ENDIF.
+ENDFORM.
