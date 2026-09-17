@@ -39,9 +39,17 @@ MODULE user_command_0200 INPUT.
       PERFORM set_all_sel USING abap_false.
       go_alv->refresh_table_display( ).
     WHEN 'POST'.
+      " Posting creates one accounting document per nota fiscal - a
+      " partial selection would leave the rest of the nota's items
+      " stranded out of that document (same reasoning as EXEC_REV below).
+      PERFORM ensure_full_docnum_selection.
       PERFORM post_released_items.
       LEAVE TO SCREEN 0. " re-run selection to reflect DB state
     WHEN 'CHECK_CANC'.
+      " Cancellation is a nota-level fact (J_1BNFDOC-CANCEL) - checking
+      " only some of a nota's items would move part of it to
+      " CANCEL_DETECTED and leave the rest stuck at POSTED.
+      PERFORM ensure_full_docnum_selection.
       PERFORM check_nf_cancellation.
       LEAVE TO SCREEN 0.
     WHEN 'EXEC_REV'.
