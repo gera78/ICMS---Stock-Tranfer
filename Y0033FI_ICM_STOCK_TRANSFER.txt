@@ -32,7 +32,6 @@ START-OF-SELECTION.
 
   PERFORM get_company_currency USING p_bukrs CHANGING gv_waers.
   PERFORM get_params USING p_bukrs.
-  PERFORM get_selection_params USING p_bukrs.
 
   IF p_mnew = 'X'.
     " Same reasoning as the P_BUKRS safety net above - this program has

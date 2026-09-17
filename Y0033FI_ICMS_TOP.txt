@@ -23,27 +23,14 @@ TABLES: j_1bnfdoc,
 *& Y0033FI_ICMS_SCR_PARAM / FORM SHOW_PARAM_MAINTENANCE.
 *&---------------------------------------------------------------------*
 DATA:
-  gv_taxgrp_icms  TYPE j_1bnfstx-taxgrp,
-  gv_kschl_yrb1   TYPE konh-kschl,
-  gv_land1        TYPE t005-land1,
-  gv_gl_debit     TYPE hkont,
-  gv_gl_credit    TYPE hkont,
-  gv_doc_type     TYPE blart,
-  gv_edoc_type    TYPE char10,
-  gv_program_id   TYPE char30.
-
-* Selection criteria - loaded from Y0033FI_ICM_SELPARM (per BUKRS),
-* NOT hardcoded constants anymore. See FORM GET_SELECTION_PARAMS in
-* Y0033FI_ICMS_F01, called once per BUKRS at the start of both main
-* programs, right alongside GET_PARAMS. Maintained via the "Maintain
-* Selection Criteria" screen (500) in the admin program - see
-* Y0033FI_ICMS_SCR_SELPARM / FORM SHOW_SELPARM_MAINTENANCE.
-* Deliberately a SEPARATE table from Y0033FI_ICM_PARM: these fields
-* decide WHO BECOMES A CANDIDATE (SELECT_TRANSFER_CANDIDATES), never
-* used at posting time, unlike everything in Y0033FI_ICM_PARM above.
-DATA:
-  gv_transfer_cfop   TYPE char10,          " CFOP identifying the intercompany transfer flow - was GC_TRANSFER_CFOP
-  gv_transfer_branch TYPE j_1bnfdoc-branch. " origin branch for the same flow - was GC_TRANSFER_BRANCH
+  gv_taxgrp_icms TYPE j_1bnfstx-taxgrp,
+  gv_kschl_yrb1  TYPE konh-kschl,
+  gv_land1       TYPE t005-land1,
+  gv_gl_debit    TYPE hkont,
+  gv_gl_credit   TYPE hkont,
+  gv_doc_type    TYPE blart,
+  gv_edoc_type   TYPE char10,
+  gv_program_id  TYPE char30.
 
 * eDocument PROC_STATUS values considered "Completed" for candidate
 * selection (source: EDOPROCSTATUS for EDOC_TYPE = BR_IN_ST).
@@ -111,6 +98,17 @@ CONSTANTS:
 DATA:
   gc_enable_search_edoc     TYPE abap_bool VALUE abap_true,
   gc_enable_search_transfer TYPE abap_bool VALUE abap_true.
+
+* TEMPORARY HARDCODED SELECTION CRITERIA for SELECT_TRANSFER_CANDIDATES
+* (Y0033FI_ICMS_F01) - pending approval; if approved, move both into a
+* maintainable config field (Y0033FI_ICM_PARM or a new table) instead
+* of a constant.
+* GC_TRANSFER_CFOP is typed CHAR10, not against J_1BNFLIN-CFOP
+* directly, so a length mismatch doesn't block activation - confirm
+* the real column length/format in SE16N before testing.
+CONSTANTS:
+  gc_transfer_branch TYPE j_1bnfdoc-branch VALUE '0006', " origin branch that emits this flow's transfers - replaces the PARVW = 'BR' check
+  gc_transfer_cfop   TYPE char10 VALUE '6152/AA'.        " CFOP a qualifying line item must have
 
 * LOG-ACTION domain
 CONSTANTS:
@@ -324,18 +322,6 @@ DATA:
   gt_fcat_param TYPE lvc_t_fcat,
   go_alv_param  TYPE REF TO cl_gui_alv_grid,
   go_cc_param   TYPE REF TO cl_gui_custom_container.
-
-* Selection criteria maintenance screen (admin only, screen 500) - see
-* Y0033FI_ICMS_F02 FORM SHOW_SELPARM_MAINTENANCE and friends. Kept
-* deliberately separate from Y0033FI_ICM_PARM: PARM holds what's used
-* AT POSTING TIME (GL accounts, doc type, tax group...), SELPARM holds
-* what's used TO IDENTIFY CANDIDATES in the first place (today: the
-* intercompany-transfer branch/CFOP in SELECT_TRANSFER_CANDIDATES).
-DATA:
-  git_selparm     TYPE STANDARD TABLE OF y0033fi_icm_selparm WITH DEFAULT KEY,
-  gt_fcat_selparm TYPE lvc_t_fcat,
-  go_alv_selparm  TYPE REF TO cl_gui_alv_grid,
-  go_cc_selparm   TYPE REF TO cl_gui_custom_container.
 
 *&---------------------------------------------------------------------*
 *& Class LCL_ALV_EVENTS - hotspot click handler (shared)

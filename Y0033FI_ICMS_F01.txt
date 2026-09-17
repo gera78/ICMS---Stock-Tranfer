@@ -75,8 +75,6 @@ ENDFORM.
 * from Y0033FI_ICM_PARM into the GV_* globals - these used to be
 * hardcoded CONSTANTS, now maintained via the "Maintain Parameters"
 * screen (400, admin only) instead of requiring a code change.
-* NOTE: candidate-selection criteria (transfer CFOP/branch) live in a
-* separate table/FORM - see GET_SELECTION_PARAMS below.
 *---------------------------------------------------------------------*
 FORM get_params USING pu_bukrs TYPE bukrs.
 
@@ -99,37 +97,6 @@ FORM get_params USING pu_bukrs TYPE bukrs.
     gv_doc_type    = 'SA'.
     gv_edoc_type   = 'BR_IN_ST'.
     gv_program_id  = 'Y0033FI_ICM_STOCK_TRANSFER'.
-    MESSAGE s018(y0033icms) WITH pu_bukrs.
-  ENDIF.
-
-ENDFORM.
-
-*&---------------------------------------------------------------------*
-*&      Form  GET_SELECTION_PARAMS
-*&---------------------------------------------------------------------*
-* Loads the candidate-selection criteria (today: the intercompany
-* transfer flow's origin branch and CFOP, used by
-* SELECT_TRANSFER_CANDIDATES) for PU_BUKRS from Y0033FI_ICM_SELPARM
-* into the GV_* globals. Kept separate from GET_PARAMS/Y0033FI_ICM_PARM
-* on purpose: those hold data used AT POSTING TIME (GL accounts, doc
-* type...); this holds data used to DECIDE WHO BECOMES A CANDIDATE in
-* the first place - two different concerns, two different tables.
-* Maintained via the "Maintain Selection Criteria" screen (500, admin
-* only) instead of requiring a code change.
-*---------------------------------------------------------------------*
-FORM get_selection_params USING pu_bukrs TYPE bukrs.
-
-  SELECT SINGLE transfer_cfop, transfer_branch
-    FROM y0033fi_icm_selparm
-    INTO (@gv_transfer_cfop, @gv_transfer_branch)
-    WHERE bukrs = @pu_bukrs.
-
-  IF sy-subrc <> 0.
-    " No row maintained yet for this company code - fall back to the
-    " original defaults so existing test setups keep working, but
-    " flag it clearly since this should be maintained per BUKRS.
-    gv_transfer_cfop   = '6152/AA'.
-    gv_transfer_branch = '0006'.
     MESSAGE s018(y0033icms) WITH pu_bukrs.
   ENDIF.
 
@@ -511,14 +478,13 @@ ENDFORM.
 * Y0033FI_ICM_EDOC same as any other GUID, purely as a "confirmed
 * arrival" record; it never gates this candidate.
 *
-* "This flow" = J_1BNFDOC-BRANCH = GV_TRANSFER_BRANCH (a known origin
-* branch) AND at least one J_1BNFLIN item at GV_TRANSFER_CFOP. Both
-* come from Y0033FI_ICM_SELPARM per BUKRS (loaded by
-* GET_SELECTION_PARAMS) - maintained via the "Maintain Selection
-* Criteria" screen (500), not a code change. PARVW = 'BR'
-* was tried first (the nota's partner being one of our own business
-* places) but was dropped in favor of this simpler, explicit
-* BRANCH+CFOP check.
+* "This flow" = J_1BNFDOC-BRANCH = GC_TRANSFER_BRANCH (a fixed, known
+* origin branch - Y0033FI_ICMS_TOP) AND at least one J_1BNFLIN item at
+* GC_TRANSFER_CFOP. Both hardcoded for now, pending approval - see the
+* constants' own comments; if approved, move them into a maintainable
+* config field instead. PARVW = 'BR' was tried first (the nota's
+* partner being one of our own business places) but was dropped in
+* favor of this simpler, explicit BRANCH+CFOP check.
 *
 * PARID still encodes the destination branch, as BUKRS (no leading
 * zeros) + BRANCH - confirmed against a real document pair (BUKRS
@@ -553,7 +519,7 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
     INTO TABLE @DATA(lt_transfer)
     WHERE bukrs  = @pu_bukrs
       AND direct = '2'
-      AND branch = @gv_transfer_branch
+      AND branch = @gc_transfer_branch
       AND nfenum IN @lt_nfenum
       AND docnum IN @s_docnum
       AND series IN @s_series
@@ -562,15 +528,14 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
   CHECK lt_transfer IS NOT INITIAL.
 
   " Only notas with at least one line item at the configured CFOP
-  " belong to this flow - GV_TRANSFER_CFOP comes from Y0033FI_ICM_PARM
-  " (per BUKRS, loaded once by GET_PARAMS), maintained via the
-  " "Maintain Parameters" screen (400) instead of a code change.
+  " belong to this flow - see GC_TRANSFER_CFOP (Y0033FI_ICMS_TOP) for
+  " why this is hardcoded for now.
   DATA lt_cfop_docnum TYPE STANDARD TABLE OF j_1bnflin-docnum WITH DEFAULT KEY.
   SELECT DISTINCT docnum FROM j_1bnflin
     INTO TABLE @lt_cfop_docnum
     FOR ALL ENTRIES IN @lt_transfer
     WHERE docnum = @lt_transfer-docnum
-      AND cfop   = @gv_transfer_cfop.
+      AND cfop   = @gc_transfer_cfop.
   SORT lt_cfop_docnum BY table_line.
 
   LOOP AT lt_transfer INTO DATA(ls_cfop_check).

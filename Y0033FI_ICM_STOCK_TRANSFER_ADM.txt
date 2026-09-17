@@ -16,9 +16,8 @@
 *&   P_MADM         -> screen 200 (admin review)
 *&   P_MPARM        -> screen 400 (General Parameters) directly
 *&   P_MLANE        -> screen 300 (Maintain Corridors) directly
-*&   P_MSEL         -> screen 500 (Selection Criteria) directly
-*& The LANE/PARAM/SELCRIT buttons on screen 200 still work too - this
-*& is just a faster path that skips loading any item list first.
+*& The LANE/PARAM buttons on screen 200 still work too - this is just
+*& a faster path that skips loading any item list first.
 *&
 *& Background jobs always run the admin-only cycle regardless of the
 *& mode selected on screen, per the agreed requirement ("both button
@@ -50,7 +49,6 @@ START-OF-SELECTION.
 
   PERFORM get_company_currency USING p_bukrs CHANGING gv_waers.
   PERFORM get_params USING p_bukrs.
-  PERFORM get_selection_params USING p_bukrs.
 
   IF sy-batch = abap_true.
     " Background job: run the full admin cycle unattended, no screen,
@@ -71,11 +69,6 @@ START-OF-SELECTION.
 
   IF p_mlane = 'X'.
     PERFORM show_lane_maintenance.
-    RETURN.
-  ENDIF.
-
-  IF p_msel = 'X'.
-    PERFORM show_selparm_maintenance.
     RETURN.
   ENDIF.
 
@@ -116,7 +109,7 @@ END-OF-SELECTION.
     RETURN.
   ENDIF.
 
-  IF p_mparm = 'X' OR p_mlane = 'X' OR p_msel = 'X'.
+  IF p_mparm = 'X' OR p_mlane = 'X'.
     RETURN. " already handled directly in START-OF-SELECTION, no item list to show
   ENDIF.
 
@@ -140,4 +133,3 @@ INCLUDE y0033fi_icms_scr_100.
 INCLUDE y0033fi_icms_scr_200.
 INCLUDE y0033fi_icms_scr_lane.
 INCLUDE y0033fi_icms_scr_param.
-INCLUDE y0033fi_icms_scr_selparm.

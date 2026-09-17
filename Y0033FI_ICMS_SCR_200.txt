@@ -51,8 +51,6 @@ MODULE user_command_0200 INPUT.
       PERFORM show_lane_maintenance. " opens screen 300 modally, returns here on Back
     WHEN 'PARAM'.
       PERFORM show_param_maintenance. " opens screen 400 modally, returns here on Back
-    WHEN 'SELCRIT'.
-      PERFORM show_selparm_maintenance. " opens screen 500 modally, returns here on Back
     WHEN 'VIEW_LOG'.
       PERFORM show_log_popup.
     WHEN 'REFRESH'.
