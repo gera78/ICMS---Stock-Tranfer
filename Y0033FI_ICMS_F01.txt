@@ -71,35 +71,63 @@ ENDFORM.
 *&      Form  GET_PARAMS
 *&---------------------------------------------------------------------*
 * Loads the business parameters (tax group, condition type, GL
-* accounts, document type, eDocument type, program id, intercompany
-* transfer CFOP and origin branch) for PU_BUKRS from Y0033FI_ICM_PARM
-* into the GV_* globals - these used to be hardcoded CONSTANTS, now
-* maintained via the "Maintain Parameters" screen (400, admin only)
-* instead of requiring a code change.
+* accounts, document type, eDocument type, program id) for PU_BUKRS
+* from Y0033FI_ICM_PARM into the GV_* globals - these used to be
+* hardcoded CONSTANTS, now maintained via the "Maintain Parameters"
+* screen (400, admin only) instead of requiring a code change.
+* NOTE: candidate-selection criteria (transfer CFOP/branch) live in a
+* separate table/FORM - see GET_SELECTION_PARAMS below.
 *---------------------------------------------------------------------*
 FORM get_params USING pu_bukrs TYPE bukrs.
 
   SELECT SINGLE taxgrp_icms, kschl_yrb1, land1, gl_debit, gl_credit,
-                doc_type, edoc_type, program_id, transfer_cfop,
-                transfer_branch
+                doc_type, edoc_type, program_id
     FROM y0033fi_icm_parm
     INTO (@gv_taxgrp_icms, @gv_kschl_yrb1, @gv_land1, @gv_gl_debit,
-          @gv_gl_credit, @gv_doc_type, @gv_edoc_type, @gv_program_id,
-          @gv_transfer_cfop, @gv_transfer_branch)
+          @gv_gl_credit, @gv_doc_type, @gv_edoc_type, @gv_program_id)
     WHERE bukrs = @pu_bukrs.
 
   IF sy-subrc <> 0.
     " No row maintained yet for this company code - fall back to the
     " original defaults so existing test setups keep working, but
     " flag it clearly since this should be maintained per BUKRS.
-    gv_taxgrp_icms     = 'ICMS'.
-    gv_kschl_yrb1      = 'YRB1'.
-    gv_land1           = 'BR'.
-    gv_gl_debit        = '0018100510'.
-    gv_gl_credit       = '0095018100'.
-    gv_doc_type        = 'SA'.
-    gv_edoc_type       = 'BR_IN_ST'.
-    gv_program_id      = 'Y0033FI_ICM_STOCK_TRANSFER'.
+    gv_taxgrp_icms = 'ICMS'.
+    gv_kschl_yrb1  = 'YRB1'.
+    gv_land1       = 'BR'.
+    gv_gl_debit    = '0018100510'.
+    gv_gl_credit   = '0095018100'.
+    gv_doc_type    = 'SA'.
+    gv_edoc_type   = 'BR_IN_ST'.
+    gv_program_id  = 'Y0033FI_ICM_STOCK_TRANSFER'.
+    MESSAGE s018(y0033icms) WITH pu_bukrs.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  GET_SELECTION_PARAMS
+*&---------------------------------------------------------------------*
+* Loads the candidate-selection criteria (today: the intercompany
+* transfer flow's origin branch and CFOP, used by
+* SELECT_TRANSFER_CANDIDATES) for PU_BUKRS from Y0033FI_ICM_SELPARM
+* into the GV_* globals. Kept separate from GET_PARAMS/Y0033FI_ICM_PARM
+* on purpose: those hold data used AT POSTING TIME (GL accounts, doc
+* type...); this holds data used to DECIDE WHO BECOMES A CANDIDATE in
+* the first place - two different concerns, two different tables.
+* Maintained via the "Maintain Selection Criteria" screen (500, admin
+* only) instead of requiring a code change.
+*---------------------------------------------------------------------*
+FORM get_selection_params USING pu_bukrs TYPE bukrs.
+
+  SELECT SINGLE transfer_cfop, transfer_branch
+    FROM y0033fi_icm_selparm
+    INTO (@gv_transfer_cfop, @gv_transfer_branch)
+    WHERE bukrs = @pu_bukrs.
+
+  IF sy-subrc <> 0.
+    " No row maintained yet for this company code - fall back to the
+    " original defaults so existing test setups keep working, but
+    " flag it clearly since this should be maintained per BUKRS.
     gv_transfer_cfop   = '6152/AA'.
     gv_transfer_branch = '0006'.
     MESSAGE s018(y0033icms) WITH pu_bukrs.
@@ -485,9 +513,9 @@ ENDFORM.
 *
 * "This flow" = J_1BNFDOC-BRANCH = GV_TRANSFER_BRANCH (a known origin
 * branch) AND at least one J_1BNFLIN item at GV_TRANSFER_CFOP. Both
-* come from Y0033FI_ICM_PARM per BUKRS (loaded by GET_PARAMS), same
-* treatment as the other business parameters - maintained via the
-* "Maintain Parameters" screen (400), not a code change. PARVW = 'BR'
+* come from Y0033FI_ICM_SELPARM per BUKRS (loaded by
+* GET_SELECTION_PARAMS) - maintained via the "Maintain Selection
+* Criteria" screen (500), not a code change. PARVW = 'BR'
 * was tried first (the nota's partner being one of our own business
 * places) but was dropped in favor of this simpler, explicit
 * BRANCH+CFOP check.

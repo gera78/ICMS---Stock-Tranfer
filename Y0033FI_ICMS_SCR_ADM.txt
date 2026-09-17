@@ -60,7 +60,8 @@ PARAMETERS:
   p_mview RADIOBUTTON GROUP mod,                        " view my candidates (user-style)
   p_madm  RADIOBUTTON GROUP mod DEFAULT 'X',             " admin review (original behavior)
   p_mparm RADIOBUTTON GROUP mod,                         " General Parameters (screen 400)
-  p_mlane RADIOBUTTON GROUP mod.                         " Maintain Corridors (screen 300)
+  p_mlane RADIOBUTTON GROUP mod,                         " Maintain Corridors (screen 300)
+  p_msel  RADIOBUTTON GROUP mod.                         " Selection Criteria (screen 500)
 SELECTION-SCREEN END OF BLOCK b2.
 
 SELECTION-SCREEN BEGIN OF BLOCK b3a WITH FRAME TITLE TEXT-b3a.
@@ -87,7 +88,7 @@ SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN END OF BLOCK b3a.
 
 SELECTION-SCREEN BEGIN OF BLOCK b3b WITH FRAME TITLE TEXT-b3b.
-* Status filter for P_MVIEW and P_MADM (not P_MNEW/P_MPARM/P_MLANE) -
+* Status filter for P_MVIEW and P_MADM (not P_MNEW/P_MPARM/P_MLANE/P_MSEL) -
 * every status a saved item can be in. All checked by default. Same
 * icon+label approach as B3A.
 *
@@ -244,12 +245,12 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 * Mode just switched (MOD_CHG fires for any change within the P_MNEW/
-* P_MVIEW/P_MADM/P_MPARM/P_MLANE radio group, not only when P_MNEW
-* itself is clicked) - reset each mode's own status filter to its
-* defined default, exactly as if the screen were opened fresh in that
-* mode. This intentionally overwrites any manual per-checkbox tweak
-* made before switching away. P_MPARM/P_MLANE have no status filter of
-* their own, so nothing to reset there.
+* P_MVIEW/P_MADM/P_MPARM/P_MLANE/P_MSEL radio group, not only when
+* P_MNEW itself is clicked) - reset each mode's own status filter to
+* its defined default, exactly as if the screen were opened fresh in
+* that mode. This intentionally overwrites any manual per-checkbox
+* tweak made before switching away. P_MPARM/P_MLANE/P_MSEL have no
+* status filter of their own, so nothing to reset there.
   IF sy-ucomm = 'MOD_CHG'.
     IF p_mnew = 'X'.
       p_sre = abap_true.  p_snc = abap_false.  p_ser = abap_false.
