@@ -71,32 +71,35 @@ ENDFORM.
 *&      Form  GET_PARAMS
 *&---------------------------------------------------------------------*
 * Loads the business parameters (tax group, condition type, GL
-* accounts, document type, eDocument type, program id) for PU_BUKRS
-* from Y0033FI_ICM_PARM into the GV_* globals - these used to be
-* hardcoded CONSTANTS, now maintained via the "Maintain Parameters"
-* screen (400, admin only) instead of requiring a code change.
+* accounts, document type, eDocument type, program id, intercompany
+* transfer CFOP) for PU_BUKRS from Y0033FI_ICM_PARM into the GV_*
+* globals - these used to be hardcoded CONSTANTS, now maintained via
+* the "Maintain Parameters" screen (400, admin only) instead of
+* requiring a code change.
 *---------------------------------------------------------------------*
 FORM get_params USING pu_bukrs TYPE bukrs.
 
   SELECT SINGLE taxgrp_icms, kschl_yrb1, land1, gl_debit, gl_credit,
-                doc_type, edoc_type, program_id
+                doc_type, edoc_type, program_id, transfer_cfop
     FROM y0033fi_icm_parm
     INTO (@gv_taxgrp_icms, @gv_kschl_yrb1, @gv_land1, @gv_gl_debit,
-          @gv_gl_credit, @gv_doc_type, @gv_edoc_type, @gv_program_id)
+          @gv_gl_credit, @gv_doc_type, @gv_edoc_type, @gv_program_id,
+          @gv_transfer_cfop)
     WHERE bukrs = @pu_bukrs.
 
   IF sy-subrc <> 0.
     " No row maintained yet for this company code - fall back to the
     " original defaults so existing test setups keep working, but
     " flag it clearly since this should be maintained per BUKRS.
-    gv_taxgrp_icms = 'ICMS'.
-    gv_kschl_yrb1  = 'YRB1'.
-    gv_land1       = 'BR'.
-    gv_gl_debit    = '0018100510'.
-    gv_gl_credit   = '0095018100'.
-    gv_doc_type    = 'SA'.
-    gv_edoc_type   = 'BR_IN_ST'.
-    gv_program_id  = 'Y0033FI_ICM_STOCK_TRANSFER'.
+    gv_taxgrp_icms   = 'ICMS'.
+    gv_kschl_yrb1    = 'YRB1'.
+    gv_land1         = 'BR'.
+    gv_gl_debit      = '0018100510'.
+    gv_gl_credit     = '0095018100'.
+    gv_doc_type      = 'SA'.
+    gv_edoc_type     = 'BR_IN_ST'.
+    gv_program_id    = 'Y0033FI_ICM_STOCK_TRANSFER'.
+    gv_transfer_cfop = '6152/AA'.
     MESSAGE s018(y0033icms) WITH pu_bukrs.
   ENDIF.
 
@@ -528,14 +531,15 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
   CHECK lt_transfer IS NOT INITIAL.
 
   " Only notas with at least one line item at the configured CFOP
-  " belong to this flow - see GC_TRANSFER_CFOP (Y0033FI_ICMS_TOP) for
-  " why this is hardcoded for now.
+  " belong to this flow - GV_TRANSFER_CFOP comes from Y0033FI_ICM_PARM
+  " (per BUKRS, loaded once by GET_PARAMS), maintained via the
+  " "Maintain Parameters" screen (400) instead of a code change.
   DATA lt_cfop_docnum TYPE STANDARD TABLE OF j_1bnflin-docnum WITH DEFAULT KEY.
   SELECT DISTINCT docnum FROM j_1bnflin
     INTO TABLE @lt_cfop_docnum
     FOR ALL ENTRIES IN @lt_transfer
     WHERE docnum = @lt_transfer-docnum
-      AND cfop   = @gc_transfer_cfop.
+      AND cfop   = @gv_transfer_cfop.
   SORT lt_cfop_docnum BY table_line.
 
   LOOP AT lt_transfer INTO DATA(ls_cfop_check).

@@ -23,14 +23,15 @@ TABLES: j_1bnfdoc,
 *& Y0033FI_ICMS_SCR_PARAM / FORM SHOW_PARAM_MAINTENANCE.
 *&---------------------------------------------------------------------*
 DATA:
-  gv_taxgrp_icms TYPE j_1bnfstx-taxgrp,
-  gv_kschl_yrb1  TYPE konh-kschl,
-  gv_land1       TYPE t005-land1,
-  gv_gl_debit    TYPE hkont,
-  gv_gl_credit   TYPE hkont,
-  gv_doc_type    TYPE blart,
-  gv_edoc_type   TYPE char10,
-  gv_program_id  TYPE char30.
+  gv_taxgrp_icms  TYPE j_1bnfstx-taxgrp,
+  gv_kschl_yrb1   TYPE konh-kschl,
+  gv_land1        TYPE t005-land1,
+  gv_gl_debit     TYPE hkont,
+  gv_gl_credit    TYPE hkont,
+  gv_doc_type     TYPE blart,
+  gv_edoc_type    TYPE char10,
+  gv_program_id   TYPE char30,
+  gv_transfer_cfop TYPE char10. " CFOP identifying the intercompany transfer flow (SELECT_TRANSFER_CANDIDATES) - was GC_TRANSFER_CFOP, now maintained per BUKRS same as the fields above
 
 * eDocument PROC_STATUS values considered "Completed" for candidate
 * selection (source: EDOPROCSTATUS for EDOC_TYPE = BR_IN_ST).
@@ -99,16 +100,12 @@ DATA:
   gc_enable_search_edoc     TYPE abap_bool VALUE abap_true,
   gc_enable_search_transfer TYPE abap_bool VALUE abap_true.
 
-* TEMPORARY HARDCODED SELECTION CRITERIA for SELECT_TRANSFER_CANDIDATES
-* (Y0033FI_ICMS_F01) - pending approval; if approved, move both into a
-* maintainable config field (Y0033FI_ICM_PARM or a new table) instead
-* of a constant.
-* GC_TRANSFER_CFOP is typed CHAR10, not against J_1BNFLIN-CFOP
-* directly, so a length mismatch doesn't block activation - confirm
-* the real column length/format in SE16N before testing.
+* TEMPORARY HARDCODED SELECTION CRITERION for SELECT_TRANSFER_CANDIDATES
+* (Y0033FI_ICMS_F01) - pending approval; if approved, move into a
+* maintainable config field too (same treatment GC_TRANSFER_CFOP just
+* got, see GV_TRANSFER_CFOP/GET_PARAMS above).
 CONSTANTS:
-  gc_transfer_branch TYPE j_1bnfdoc-branch VALUE '0006', " origin branch that emits this flow's transfers - replaces the PARVW = 'BR' check
-  gc_transfer_cfop   TYPE char10 VALUE '6152/AA'.        " CFOP a qualifying line item must have
+  gc_transfer_branch TYPE j_1bnfdoc-branch VALUE '0006'. " origin branch that emits this flow's transfers - replaces the PARVW = 'BR' check
 
 * LOG-ACTION domain
 CONSTANTS:

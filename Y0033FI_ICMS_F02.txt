@@ -885,6 +885,7 @@ FORM build_param_fieldcat.
   add_param_field 'DOC_TYPE'     'Doc. Type'       6   'X'.
   add_param_field 'EDOC_TYPE'    'eDoc. Type'     10   'X'.
   add_param_field 'PROGRAM_ID'   'Program Id'     30   'X'.
+  add_param_field 'TRANSFER_CFOP' 'Transfer CFOP' 10   'X'.
   add_param_field 'CHANGED_BY'   'Changed By'     12   space.
   add_param_field 'CHANGED_ON'   'Changed On'     12   space.
 
