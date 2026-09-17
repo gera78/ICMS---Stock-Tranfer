@@ -9,11 +9,8 @@
 *& admin can perform the same actions the user cockpit offers (search
 *& new candidates / view+approve+request reversal), in addition to
 *& the admin-only actions on screen 200 (Create Document(s) / Check
-*& Cancellations / Execute Reversal). The selection screen itself is
-*& split the same way: Y0033FI_ICMS_SCR_USR (also used standalone by
-*& Y0033FI_ICM_STOCK_TRANSFER) declares everything P_MNEW/P_MVIEW
-*& need, and Y0033FI_ICMS_SCR_ADM adds only what is exclusive to this
-*& program. The mode radio button decides which screen opens - see
+*& Cancellations / Execute Reversal). The mode radio button on the
+*& selection screen decides which screen opens - see
 *& Y0033FI_ICMS_SCR_ADM:
 *&   P_MNEW/P_MVIEW -> screen 100 (user-style)
 *&   P_MADM         -> screen 200 (admin review)
@@ -31,7 +28,6 @@
 REPORT y0033fi_icm_stock_transfer_adm MESSAGE-ID y0033icms.
 
 INCLUDE y0033fi_icms_top.
-INCLUDE y0033fi_icms_scr_usr.
 INCLUDE y0033fi_icms_scr_adm.
 INCLUDE y0033fi_icms_f01.
 INCLUDE y0033fi_icms_f02.

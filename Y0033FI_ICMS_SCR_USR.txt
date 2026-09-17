@@ -5,25 +5,6 @@
 *& cockpit). Kept separate from the main program so the processing
 *& flow (START-OF-SELECTION / screen modules) stays readable on its
 *& own - classic TOP/SCR/F01 include split.
-*&
-*& Also included by Y0033FI_ICM_STOCK_TRANSFER_ADM (see
-*& Y0033FI_ICMS_SCR_ADM) - everything here is common to both programs
-*& (P_MNEW/P_MVIEW modes and their filters, identical field-for-field
-*& in both). Y0033FI_ICMS_SCR_ADM adds only what is exclusive to the
-*& admin program (P_MADM/P_MPARM/P_MLANE and the MAG1/MAG2 admin
-*& filter shortcuts) in its own blocks, since a SELECTION-SCREEN block
-*& opened here cannot be reopened there.
-*&
-*& INITIALIZATION/AT SELECTION-SCREEN OUTPUT/AT SELECTION-SCREEN can
-*& each only be coded ONCE per program (activation error otherwise:
-*& "the event ... was already specified"), so Y0033FI_ICMS_SCR_ADM
-*& cannot declare its own copies of these three - its extra logic runs
-*& through the dynamic PERFORM (lv_name) IN PROGRAM (sy-cprog)
-*& IF FOUND hooks below instead. That syntax compiles fine even in
-*& the plain user program, where those FORMs don't exist - IF FOUND
-*& just makes it a no-op there. IN PROGRAM is not optional here - bare
-*& PERFORM (x) IF FOUND (without IN PROGRAM) raises "Routine name not
-*& specified".
 *&---------------------------------------------------------------------*
 
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
@@ -44,15 +25,13 @@ SELECT-OPTIONS:
   s_series FOR j_1bnfdoc-series,                " NFe series
   s_docdat FOR j_1bnfdoc-docdat MODIF ID fs,    " nota fiscal creation date - search mode only (view mode already filters this via S_DATUM, see REFRESH_FROM_DB)
   s_acckey FOR y0033fi_icm_edoc-accesskey,      " NF-e access key (44 digits) - typed against Y0033FI_ICM_EDOC-ACCESSKEY (CHAR44), not the source table directly: EDOBRINCOMING-ACCESSKEY is TYPE STRING, which selection-screen fields can't use
-* S_LCTO only applies in view mode (and admin review, when this
-* include is used by the admin program) - nothing is posted yet in
-* search mode, so it is hidden there (same MODIF ID FV as the status
-* filter).
+* S_LCTO only applies in view mode - nothing is posted yet in search
+* mode, so it is hidden there (same MODIF ID FV as the status filter).
   s_lcto   FOR sy-datum MODIF ID fv,
 * TODO (Q5/Q8): reference date for selection still pending - uses
 * nota fiscal issue date for now.
-* Action Date - view mode (and admin review) only, same MODIF ID FV.
-* Distinct from S_DATUM (eDocument creation date) and S_LCTO (BUDAT_FI, the posting
+* Action Date - view mode only (same MODIF ID FV). Distinct from
+* S_DATUM (eDocument creation date) and S_LCTO (BUDAT_FI, the posting
 * accounting date, which is not reliable for "posted on date X": it
 * can be backdated and gets forced to today by the period-closed retry
 * in POST_RELEASED_ITEMS). Filters by when a lifecycle transition
@@ -71,15 +50,6 @@ SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-b02.
 * (without it, AT SELECTION-SCREEN OUTPUT only reruns on the next
 * Enter/round trip, so the filter block below would not hide/show
 * right away).
-*
-* P_MADM/P_MPARM/P_MLANE (admin program only, Y0033FI_ICMS_SCR_ADM)
-* are NOT part of this RADIOBUTTON GROUP - SAP requires every member
-* of a group to be declared in the SAME SELECTION-SCREEN block, and
-* this one is opened and closed entirely here (it must be, since this
-* include is also used standalone, without the admin program's extra
-* modes). The admin program's own modes use a second, independent
-* group instead, kept in sync with this one by hand - see
-* Y0033FI_ICMS_SCR_ADM's own B2B block and its AT SELECTION-SCREEN.
 PARAMETERS:
   p_mnew  RADIOBUTTON GROUP mod DEFAULT 'X' USER-COMMAND mod_chg,   " search new candidates
   p_mview RADIOBUTTON GROUP mod.               " view my candidates
@@ -125,24 +95,17 @@ SELECTION-SCREEN BEGIN OF BLOCK b3b WITH FRAME TITLE TEXT-b3b.
 * this is just a quick way to mark/unmark a group. All three are also
 * reset to their default state whenever the mode switches to View (see
 * MOD_CHG below), not just at screen startup.
-*
-* MODIF ID MV (not FV, like the 11 checkboxes below) - own group so
-* the admin program (Y0033FI_ICMS_SCR_ADM) can hide these three
-* View-only master checkboxes independently of its own admin-only
-* MAG1/MAG2 pair (MODIF ID MA, declared in its own separate block/
-* frame there - it cannot be spliced into the middle of this block
-* from another include).
 SELECTION-SCREEN BEGIN OF LINE.
-PARAMETERS p_mvg1 TYPE char1 AS CHECKBOX DEFAULT 'X' USER-COMMAND mvg1 MODIF ID mv.
-SELECTION-SCREEN COMMENT 4(60) c_mvg1 MODIF ID mv.
+PARAMETERS p_mvg1 TYPE char1 AS CHECKBOX DEFAULT 'X' USER-COMMAND mvg1 MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(60) c_mvg1 MODIF ID fv.
 SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN BEGIN OF LINE.
-PARAMETERS p_mvg3 TYPE char1 AS CHECKBOX DEFAULT 'X' USER-COMMAND mvg3 MODIF ID mv.
-SELECTION-SCREEN COMMENT 4(60) c_mvg3 MODIF ID mv.
+PARAMETERS p_mvg3 TYPE char1 AS CHECKBOX DEFAULT 'X' USER-COMMAND mvg3 MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(60) c_mvg3 MODIF ID fv.
 SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN BEGIN OF LINE.
-PARAMETERS p_mvg2 TYPE char1 AS CHECKBOX USER-COMMAND mvg2 MODIF ID mv.
-SELECTION-SCREEN COMMENT 4(60) c_mvg2 MODIF ID mv.
+PARAMETERS p_mvg2 TYPE char1 AS CHECKBOX USER-COMMAND mvg2 MODIF ID fv.
+SELECTION-SCREEN COMMENT 4(60) c_mvg2 MODIF ID fv.
 SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN ULINE /1(79) MODIF ID fv.
 SELECTION-SCREEN BEGIN OF LINE.
@@ -227,22 +190,6 @@ INITIALIZATION.
   c_mvg3 = 'Reversal (040)'.
   c_mvg2 = 'Others (015, 020, 025, 045, 030, 060, 070, 990)'.
 
-* Applied once here too, not just on MOD_CHG below - the individual
-* filter checkboxes all carry PARAMETERS-level DEFAULT 'X', so without
-* this the very first screen display would show every one of them
-* checked regardless of the actual default mode, until the user
-* touched a radio button and triggered MOD_CHG for the first time.
-  PERFORM set_status_filter_defaults.
-
-* Admin-only hook - see the header comment above for why this can't
-* just be the admin program's own INITIALIZATION block. No-op (silent
-* skip) when this include is compiled standalone, since FORM
-* ADM_SCR_INIT then doesn't exist anywhere in the program. IF FOUND is
-* only valid together with IN PROGRAM - PERFORM (x) IF FOUND alone
-* (without IN PROGRAM) raises "Routine name not specified".
-  DATA lv_adm_scr_init TYPE c LENGTH 30 VALUE 'ADM_SCR_INIT'.
-  PERFORM (lv_adm_scr_init) IN PROGRAM (sy-cprog) IF FOUND.
-
 AT SELECTION-SCREEN OUTPUT.
   LOOP AT SCREEN.
     IF screen-group1 = 'FS' AND p_mnew <> 'X'.
@@ -250,18 +197,10 @@ AT SELECTION-SCREEN OUTPUT.
       MODIFY SCREEN.
     ENDIF.
     IF screen-group1 = 'FV' AND p_mview <> 'X'.
-      screen-active = 0.  " hide entirely - only applies to view mode (also re-shown for admin review - see ADM_SCR_OUTPUT below)
-      MODIFY SCREEN.
-    ENDIF.
-    IF screen-group1 = 'MV' AND p_mview <> 'X'.
-      screen-active = 0.  " hide the "View" master checkboxes outside view mode
+      screen-active = 0.  " hide entirely - only applies to view mode
       MODIFY SCREEN.
     ENDIF.
   ENDLOOP.
-
-* Admin-only hook - same reasoning as ADM_SCR_INIT above.
-  DATA lv_adm_scr_output TYPE c LENGTH 30 VALUE 'ADM_SCR_OUTPUT'.
-  PERFORM (lv_adm_scr_output) IN PROGRAM (sy-cprog) IF FOUND.
 
 AT SELECTION-SCREEN.
 * ONLI = the user pressed Execute (F8), not just clicked a radio
@@ -283,7 +222,14 @@ AT SELECTION-SCREEN.
 * the screen were opened fresh in that mode. This intentionally
 * overwrites any manual per-checkbox tweak made before switching away.
   IF sy-ucomm = 'MOD_CHG'.
-    PERFORM set_status_filter_defaults.
+    IF p_mnew = 'X'.
+      p_sre = abap_true.  p_snc = abap_false.  p_ser = abap_false.
+    ELSEIF p_mview = 'X'.
+      p_vca = abap_true.   p_vcd = abap_true.                    " needs my action (010, 050)
+      p_vpo = abap_false.                                        " reversal (040) - off by default
+      p_vrj = abap_false.  p_vap = abap_false.  p_vpf = abap_false.  p_vcb = abap_false.
+      p_vpg = abap_false.  p_vrr = abap_false.  p_vrv = abap_false.  p_ver = abap_false. " others
+    ENDIF.
   ENDIF.
 
 * "Master" checkboxes (B3B) - group-toggle the real filter checkboxes
@@ -312,38 +258,3 @@ AT SELECTION-SCREEN.
                          AND p_vpg = abap_true AND p_vrr = abap_true AND p_vrv = abap_true
                          AND p_ver = abap_true
                     THEN abap_true ELSE abap_false ).
-
-* Admin-only hook - same reasoning as ADM_SCR_INIT above. Handles
-* MOD_CHG2, MAG1/MAG2 and the P_MADM-specific status filter reset -
-* none of which this include knows anything about.
-  DATA lv_adm_scr_event TYPE c LENGTH 30 VALUE 'ADM_SCR_EVENT'.
-  PERFORM (lv_adm_scr_event) IN PROGRAM (sy-cprog) IF FOUND.
-
-*&---------------------------------------------------------------------*
-*&      Form  SET_STATUS_FILTER_DEFAULTS
-*&---------------------------------------------------------------------*
-* Resets the per-status filter checkboxes (B3A/B3B) to the current
-* mode's default set. Called both from INITIALIZATION (so the very
-* first screen display already matches the default mode, instead of
-* showing every checkbox checked - their PARAMETERS-level DEFAULT 'X'
-* only makes sense as a safe fallback) and from AT SELECTION-SCREEN on
-* MOD_CHG (every later mode switch).
-*
-* Only handles P_MNEW/P_MVIEW - the two modes this include itself
-* knows about. Called unconditionally above regardless of which
-* program is running; it is a no-op whenever P_MADM/P_MPARM/P_MLANE is
-* selected, since neither branch matches. The admin program applies
-* its own P_MADM-specific reset separately, via the ADM_SCR_INIT/
-* ADM_SCR_EVENT hooks above calling SET_ADM_STATUS_DEFAULTS
-* (Y0033FI_ICMS_SCR_ADM).
-*---------------------------------------------------------------------*
-FORM set_status_filter_defaults.
-  IF p_mnew = 'X'.
-    p_sre = abap_true.  p_snc = abap_false.  p_ser = abap_false.
-  ELSEIF p_mview = 'X'.
-    p_vca = abap_true.   p_vcd = abap_true.                    " needs my action (010, 050)
-    p_vpo = abap_false.                                        " reversal (040) - off by default
-    p_vrj = abap_false.  p_vap = abap_false.  p_vpf = abap_false.  p_vcb = abap_false.
-    p_vpg = abap_false.  p_vrr = abap_false.  p_vrv = abap_false.  p_ver = abap_false. " others
-  ENDIF.
-ENDFORM.
