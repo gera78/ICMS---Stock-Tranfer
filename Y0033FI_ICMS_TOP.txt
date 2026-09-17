@@ -213,6 +213,14 @@ TYPES:
     bldat_fi     TYPE bldat,
     budat_fi     TYPE budat,
     period_fallback TYPE char1,
+    " When POST_ONE_DOCUMENT actually ran (system date/time), same
+    " pattern as APR_DATE/APR_TIME/APR_USER - NOT the same thing as
+    " BLDAT_FI/BUDAT_FI above, which are accounting dates (the nota
+    " fiscal's own date, or today only on the period-closed fallback),
+    " not necessarily the real moment the posting happened.
+    pst_user     TYPE syuname,
+    pst_date     TYPE dats,
+    pst_time     TYPE tims,
     canc_det_date TYPE dats,
     canc_det_time TYPE tims,
     canc_det_user TYPE syuname,

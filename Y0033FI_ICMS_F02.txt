@@ -489,6 +489,9 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
                                 bldat_fi = @lv_bldat,
                                 budat_fi = @lv_budat,
                                 period_fallback = @lv_fallback,
+                                pst_user = @sy-uname,
+                                pst_date = @sy-datum,
+                                pst_time = @sy-uzeit,
                                 msg      = @space
       WHERE docnum = @ls_it-docnum AND itmnum = @ls_it-itmnum AND seqnr = @ls_it-seqnr.
     " Clears any MSG left over from a previous failed attempt

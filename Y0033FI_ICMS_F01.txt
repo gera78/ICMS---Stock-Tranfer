@@ -2313,8 +2313,13 @@ FORM build_fieldcat USING pu_mode TYPE c.
   add_field 'BUZEI_FI'    'Item'              6.
   add_field 'CRE_USER'    'Created by'       12.
   add_field 'CRE_DATE'    'Created on'       10.
+  add_field 'CRE_TIME'    'Created at'       10.
   add_field 'APR_USER'    'Approved by'      12.
   add_field 'APR_DATE'    'Approved on'      10.
+  add_field 'APR_TIME'    'Approved at'      10.
+  add_field 'PST_USER'    'Posted by'        12.
+  add_field 'PST_DATE'    'Posted on'        10.
+  add_field 'PST_TIME'    'Posted at'        10.
   add_field 'REVERSAL_TRIGGER' 'Rev. trigger'    20.
 
   add_field 'MSG' 'Message / Pending' 60.
