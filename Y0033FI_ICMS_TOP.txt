@@ -101,7 +101,7 @@ DATA:
 
 * NOTE: the intercompany-transfer flow's origin branch and CFOP are
 * NOT constants/config fields anymore - they're read straight out of
-* Y0033FI_ICM_LANE (VENDOR_CODE / TRANSFER_CFOP) by
+* Y0033FI_ICM_LANE (TRANSFER_BRANCH / TRANSFER_CFOP) by
 * SELECT_TRANSFER_CANDIDATES, same table that already decides
 * eligibility and benefit % for this flow. See that FORM's header
 * comment (Y0033FI_ICMS_F01) and TY_LANE_KEY above.
@@ -273,7 +273,13 @@ TYPES:
     country       TYPE land1,
     plant_code    TYPE werks_d,
     plant_region  TYPE t005u-bland,
-    transfer_cfop TYPE char10, " 8th match field, blank = wildcard like the other 7 - CFOP identifying the intercompany transfer flow (SELECT_TRANSFER_CANDIDATES only; blank for the eDocument-driven flow, which never sets it)
+    transfer_cfop   TYPE char10,          " 8th match field, blank = wildcard like the other 7 - CFOP identifying the intercompany transfer flow (blank for the eDocument-driven flow, which never sets it)
+* 9th match field - origin branch for the intercompany transfer flow.
+* A DEDICATED field, NOT VENDOR_CODE: VENDOR_CODE is CHAR10 (still
+* needed as-is for the real-vendor flow) and BRANCH is CHAR4 - reusing
+* VENDOR_CODE for both caused a real ALPHA/zero-pad conversion bug
+* ("0006" saved/read back as "0000").
+    transfer_branch TYPE j_1bnfdoc-branch,
   END OF ty_lane_key.
 
 * Used by FORM MATCH_LANE (Y0033FI_ICMS_F01) - the caller

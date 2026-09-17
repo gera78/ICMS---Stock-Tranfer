@@ -219,7 +219,8 @@ FORM match_lane USING pu_key      TYPE ty_lane_key
       AND ( country       = pu_key-country       OR country       = space )
       AND ( plant_code    = pu_key-plant_code    OR plant_code    = space )
       AND ( plant_region  = pu_key-plant_region  OR plant_region  = space )
-      AND ( transfer_cfop = pu_key-transfer_cfop OR transfer_cfop = space ).
+      AND ( transfer_cfop   = pu_key-transfer_cfop   OR transfer_cfop   = space )
+      AND ( transfer_branch = pu_key-transfer_branch OR transfer_branch = space ).
     APPEND ls_lane_row TO lt_lane.
   ENDLOOP.
 
@@ -482,16 +483,22 @@ ENDFORM.
 * "This flow" is decided entirely by Y0033FI_ICM_LANE now, the same
 * table that already decides eligibility/benefit % for this flow -
 * nothing hardcoded, nothing in a separate config table:
-*   - VENDOR_CODE (non-blank rows) lists the origin branches in scope
-*     - narrows the initial J_1BNFDOC-BRANCH read below.
-*   - TRANSFER_CFOP (non-blank rows) lists the qualifying CFOPs - an
-*     8th LANE match field (see TY_LANE_KEY, Y0033FI_ICMS_TOP), blank
-*     = wildcard like the other 7. Narrows the J_1BNFLIN read below,
-*     and the matched item's own CFOP feeds MATCH_LANE per document,
-*     so a lane can require a specific CFOP or accept any.
-* A LANE row with blank VENDOR_CODE/TRANSFER_CFOP still only matches
-* THIS flow if TRANSFER_CFOP is blank too (see MATCH_LANE) - existing
-* eDocument-flow rows (which never set TRANSFER_CFOP) are unaffected.
+*   - TRANSFER_BRANCH (non-blank rows) lists the origin branches in
+*     scope - narrows the initial J_1BNFDOC-BRANCH read below. A
+*     DEDICATED CHAR4 field, not VENDOR_CODE (CHAR10): reusing
+*     VENDOR_CODE for a branch caused a real ALPHA/zero-pad conversion
+*     bug ("0006" saved/read back as "0000") - see TY_LANE_KEY,
+*     Y0033FI_ICMS_TOP. VENDOR_CODE stays free for its own real-vendor
+*     meaning, still used as-is by the eDocument-driven flow.
+*   - TRANSFER_CFOP (non-blank rows) lists the qualifying CFOPs - blank
+*     = wildcard like the other LANE key fields. Narrows the
+*     J_1BNFLIN read below, and the matched item's own CFOP feeds
+*     MATCH_LANE per document, so a lane can require a specific CFOP
+*     or accept any.
+* A LANE row with blank TRANSFER_BRANCH/TRANSFER_CFOP still only
+* matches THIS flow if TRANSFER_CFOP is blank too (see MATCH_LANE) -
+* existing eDocument-flow rows (which never set TRANSFER_CFOP) are
+* unaffected.
 *
 * PARID encodes the destination branch, as BUKRS (no leading zeros) +
 * BRANCH - confirmed against a real document pair (BUKRS 0033/BRANCH
@@ -502,14 +509,17 @@ ENDFORM.
 * sample document, so confirm it still holds for a company code whose
 * BUKRS isn't "0033" before relying on it for real postings.
 *
-* MATCH_LANE itself is untouched - its other 7 generic key fields are
-* reused with a different meaning for this flow (lane maintenance for
-* these rows keys on branch, not a real vendor):
-*   VENDOR_CODE   = origin branch (this doc's own BRANCH)
+* MATCH_LANE itself is untouched apart from the added TRANSFER_BRANCH
+* field - some of its other generic key fields are reused with a
+* different meaning for this flow (lane maintenance for these rows
+* keys on branch, not a real vendor):
+*   TRANSFER_BRANCH = origin branch (this doc's own BRANCH)
+*   VENDOR_CODE   = blank - not used by this flow, left free for the
+*                   eDocument flow's real-vendor meaning
 *   VENDOR_TAX_ID = origin CNPJ (CNPJ_BUPLA)
 *   VENDOR_REGION = blank - not on the header for the origin side;
-*                   VENDOR_CODE above is already an exact, unambiguous
-*                   key on its own
+*                   TRANSFER_BRANCH above is already an exact,
+*                   unambiguous key on its own
 *   PLANT_CODE    = destination branch (from PARID) - not a real plant
 *                   (WERKS) yet, see the T001W lookup below
 *   PLANT_REGION  = destination region - already on the header
@@ -521,15 +531,16 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
   SELECT * FROM y0033fi_icm_lane
     INTO TABLE @lt_lane_all.
 
-  " Candidate origin branches = every non-blank VENDOR_CODE configured
-  " for this BUKRS - narrows the J_1BNFDOC read below. A blank
-  " VENDOR_CODE (wildcard) can't narrow anything and is excluded here;
-  " it's still honored later, per document, by MATCH_LANE itself.
+  " Candidate origin branches = every non-blank TRANSFER_BRANCH
+  " configured for this BUKRS - narrows the J_1BNFDOC read below. A
+  " blank TRANSFER_BRANCH (wildcard) can't narrow anything and is
+  " excluded here; it's still honored later, per document, by
+  " MATCH_LANE itself.
   TYPES ty_r_branch TYPE RANGE OF j_1bnfdoc-branch.
   DATA lr_branch TYPE ty_r_branch.
   LOOP AT lt_lane_all INTO DATA(ls_lane_b)
-    WHERE bukrs = pu_bukrs AND vendor_code IS NOT INITIAL.
-    APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_lane_b-vendor_code ) TO lr_branch.
+    WHERE bukrs = pu_bukrs AND transfer_branch IS NOT INITIAL.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_lane_b-transfer_branch ) TO lr_branch.
   ENDLOOP.
   SORT lr_branch.
   DELETE ADJACENT DUPLICATES FROM lr_branch.
@@ -597,14 +608,15 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
     DATA(lv_dest_branch) = ls_nfdoc-parid+lv_off(4).
 
     DATA(ls_lane_key) = VALUE ty_lane_key(
-      bukrs         = ls_nfdoc-bukrs
-      vendor_code   = ls_nfdoc-branch
-      vendor_tax_id = ls_nfdoc-cnpj_bupla
-      vendor_region = space
-      country       = ls_nfdoc-land1
-      plant_code    = lv_dest_branch
-      plant_region  = ls_nfdoc-regio
-      transfer_cfop = ls_cfop_hit-cfop ).
+      bukrs           = ls_nfdoc-bukrs
+      vendor_code     = space
+      vendor_tax_id   = ls_nfdoc-cnpj_bupla
+      vendor_region   = space
+      country         = ls_nfdoc-land1
+      plant_code      = lv_dest_branch
+      plant_region    = ls_nfdoc-regio
+      transfer_cfop   = ls_cfop_hit-cfop
+      transfer_branch = ls_nfdoc-branch ).
 
     DATA lv_origin TYPE t005u-bland.
     DATA lv_dest   TYPE t005u-bland.
