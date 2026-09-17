@@ -18,11 +18,12 @@
 *& each only be coded ONCE per program (activation error otherwise:
 *& "the event ... was already specified"), so Y0033FI_ICMS_SCR_ADM
 *& cannot declare its own copies of these three - its extra logic runs
-*& through the dynamic PERFORM (lv_name) IF FOUND hooks below instead.
-*& That syntax compiles fine even in the plain user program, where
-*& those FORMs don't exist - IF FOUND just makes it a no-op there. The
-*& name must sit in a variable, not a literal directly in parentheses
-*& - PERFORM ('X') IF FOUND raises "Routine name not specified".
+*& through the dynamic PERFORM (lv_name) IN PROGRAM (sy-cprog)
+*& IF FOUND hooks below instead. That syntax compiles fine even in
+*& the plain user program, where those FORMs don't exist - IF FOUND
+*& just makes it a no-op there. IN PROGRAM is not optional here - bare
+*& PERFORM (x) IF FOUND (without IN PROGRAM) raises "Routine name not
+*& specified".
 *&---------------------------------------------------------------------*
 
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
@@ -236,12 +237,11 @@ INITIALIZATION.
 * Admin-only hook - see the header comment above for why this can't
 * just be the admin program's own INITIALIZATION block. No-op (silent
 * skip) when this include is compiled standalone, since FORM
-* ADM_SCR_INIT then doesn't exist anywhere in the program. The name
-* must sit in a variable, not a literal directly in parentheses -
-* PERFORM ('ADM_SCR_INIT') IF FOUND raises "Routine name not
-* specified" (a literal there is not resolved as a routine name).
-  DATA(lv_adm_scr_init) = 'ADM_SCR_INIT'.
-  PERFORM (lv_adm_scr_init) IF FOUND.
+* ADM_SCR_INIT then doesn't exist anywhere in the program. IF FOUND is
+* only valid together with IN PROGRAM - PERFORM (x) IF FOUND alone
+* (without IN PROGRAM) raises "Routine name not specified".
+  DATA lv_adm_scr_init TYPE c LENGTH 30 VALUE 'ADM_SCR_INIT'.
+  PERFORM (lv_adm_scr_init) IN PROGRAM (sy-cprog) IF FOUND.
 
 AT SELECTION-SCREEN OUTPUT.
   LOOP AT SCREEN.
@@ -260,8 +260,8 @@ AT SELECTION-SCREEN OUTPUT.
   ENDLOOP.
 
 * Admin-only hook - same reasoning as ADM_SCR_INIT above.
-  DATA(lv_adm_scr_output) = 'ADM_SCR_OUTPUT'.
-  PERFORM (lv_adm_scr_output) IF FOUND.
+  DATA lv_adm_scr_output TYPE c LENGTH 30 VALUE 'ADM_SCR_OUTPUT'.
+  PERFORM (lv_adm_scr_output) IN PROGRAM (sy-cprog) IF FOUND.
 
 AT SELECTION-SCREEN.
 * ONLI = the user pressed Execute (F8), not just clicked a radio
@@ -316,8 +316,8 @@ AT SELECTION-SCREEN.
 * Admin-only hook - same reasoning as ADM_SCR_INIT above. Handles
 * MOD_CHG2, MAG1/MAG2 and the P_MADM-specific status filter reset -
 * none of which this include knows anything about.
-  DATA(lv_adm_scr_event) = 'ADM_SCR_EVENT'.
-  PERFORM (lv_adm_scr_event) IF FOUND.
+  DATA lv_adm_scr_event TYPE c LENGTH 30 VALUE 'ADM_SCR_EVENT'.
+  PERFORM (lv_adm_scr_event) IN PROGRAM (sy-cprog) IF FOUND.
 
 *&---------------------------------------------------------------------*
 *&      Form  SET_STATUS_FILTER_DEFAULTS
