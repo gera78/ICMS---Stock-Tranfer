@@ -180,6 +180,29 @@ FORM post_released_items.
 
   ENDLOOP.
 
+  " Summary message - POST_ONE_DOCUMENT never reports back to this FORM
+  " (it updates Y0033FI_ICM_ITEM directly, chunk by chunk), so the only
+  " reliable way to know the outcome is to re-read the same items this
+  " run started with and see where each one landed.
+  DATA lv_posted_ok   TYPE i.
+  DATA lv_posted_fail TYPE i.
+  LOOP AT lt_approved INTO DATA(ls_result).
+    SELECT SINGLE status FROM y0033fi_icm_item
+      INTO @DATA(lv_result_status)
+      WHERE docnum = @ls_result-docnum AND itmnum = @ls_result-itmnum AND seqnr = @ls_result-seqnr.
+    IF lv_result_status = gc_status-posted.
+      lv_posted_ok = lv_posted_ok + 1.
+    ELSE.
+      lv_posted_fail = lv_posted_fail + 1.
+    ENDIF.
+  ENDLOOP.
+
+  IF lv_posted_fail > 0.
+    MESSAGE s022(y0033icms) WITH lv_posted_ok lv_posted_fail DISPLAY LIKE 'E'.
+  ELSE.
+    MESSAGE s022(y0033icms) WITH lv_posted_ok lv_posted_fail.
+  ENDIF.
+
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -709,6 +732,29 @@ FORM execute_reversal.
     ENDIF.
 
   ENDLOOP.
+
+  " Summary message - same reasoning as POST_RELEASED_ITEMS: re-read
+  " the items this run started with (LT_STRQ) and see where each one
+  " landed, since the reversal/re-post logic above updates
+  " Y0033FI_ICM_ITEM directly, per group, not back into this table.
+  DATA lv_reversed_ok   TYPE i.
+  DATA lv_reversed_fail TYPE i.
+  LOOP AT lt_strq INTO DATA(ls_rev_result).
+    SELECT SINGLE status FROM y0033fi_icm_item
+      INTO @DATA(lv_rev_result_status)
+      WHERE docnum = @ls_rev_result-docnum AND itmnum = @ls_rev_result-itmnum AND seqnr = @ls_rev_result-seqnr.
+    IF lv_rev_result_status = gc_status-reversed.
+      lv_reversed_ok = lv_reversed_ok + 1.
+    ELSE.
+      lv_reversed_fail = lv_reversed_fail + 1.
+    ENDIF.
+  ENDLOOP.
+
+  IF lv_reversed_fail > 0.
+    MESSAGE s023(y0033icms) WITH lv_reversed_ok lv_reversed_fail DISPLAY LIKE 'E'.
+  ELSE.
+    MESSAGE s023(y0033icms) WITH lv_reversed_ok lv_reversed_fail.
+  ENDIF.
 
 ENDFORM.
 
