@@ -643,6 +643,13 @@ FORM execute_reversal.
     DATA lv_rev_obj_sys  TYPE bapiache09-obj_sys.
     DATA lt_rev_return   TYPE TABLE OF bapiret2.
 
+    " Same reasoning as POST_ONE_DOCUMENT - BKPF-TCODE otherwise
+    " records SE38 for this reversal document too.
+    DATA(lv_saved_tcode_rev) = sy-tcode.
+    IF gv_program_id IS NOT INITIAL.
+      sy-tcode = gv_program_id.
+    ENDIF.
+
     CALL FUNCTION 'BAPI_ACC_DOCUMENT_REV_POST'
       EXPORTING
         reversal        = ls_reversal
@@ -653,6 +660,8 @@ FORM execute_reversal.
         obj_sys         = lv_rev_obj_sys
       TABLES
         return          = lt_rev_return.
+
+    sy-tcode = lv_saved_tcode_rev. " restore immediately - never leak the fake value beyond this BAPI call
 
     READ TABLE lt_rev_return WITH KEY type = 'E' TRANSPORTING NO FIELDS.
     IF sy-subrc <> 0.
