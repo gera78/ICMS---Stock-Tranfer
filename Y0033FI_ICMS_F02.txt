@@ -286,6 +286,19 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
   DATA(lv_budat) = COND #( WHEN lv_is_retry = abap_true THEN sy-datum ELSE ls_any-docdat ).
   DATA(lv_fallback) = lv_is_retry.
 
+  " BKPF-TCODE otherwise records SE38 (this report's own execution
+  " context, not a real transaction) - the previous attempt to fix
+  " this via EXTENSION1/FIELD1='BKPF-TCODE' broke the posting itself
+  " ("Inconsistent FI/CO document header data"), since EXTENSION1
+  " needs a matching FI BAdI to interpret it, which doesn't exist
+  " here. SY-TCODE itself is only read (not enforced) by the posting
+  " kernel, so swapping it just for this BAPI call and restoring it
+  " right after is safe and doesn't touch document consistency.
+  DATA(lv_saved_tcode) = sy-tcode.
+  IF gv_program_id IS NOT INITIAL.
+    sy-tcode = gv_program_id.
+  ENDIF.
+
   DO 2 TIMES.
     CLEAR: ls_header, lt_gl, lt_cur, lt_return, ls_err, lt_buzei.
     lv_itemno = 0.
@@ -356,16 +369,6 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       APPEND ls_cur TO lt_cur.
     ENDLOOP.
 
-    " REVERTED: EXTENSION1 with FIELD1 = 'BKPF-TCODE' was added to
-    " record GV_PROGRAM_ID as the document's originating transaction
-    " (otherwise the BAPI records "SE38", not meaningful for a
-    " background/report program). Removed again - a real test right
-    " after adding it produced "FI/CO interface: Inconsistent FI/CO
-    " document header data for updating", a classic symptom of a bad
-    " EXTENSION1 entry. 'BKPF-TCODE' was never confirmed as a valid
-    " FIELD1 target for this BAPI/release - do not re-add without
-    " confirming the correct target first.
-
     CALL FUNCTION 'BAPI_ACC_DOCUMENT_POST'
       EXPORTING
         documentheader = ls_header
@@ -404,6 +407,8 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       EXIT.
     ENDIF.
   ENDDO.
+
+  sy-tcode = lv_saved_tcode. " restore immediately - never leak the fake value beyond this BAPI call
 
   IF ls_err IS NOT INITIAL.
     PERFORM smart_case CHANGING ls_err-message.
