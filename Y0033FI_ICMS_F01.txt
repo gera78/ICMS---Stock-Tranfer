@@ -1260,6 +1260,7 @@ FORM build_celltab.
           'PST_DATE'     TO lt_fieldnames,
           'PST_TIME'     TO lt_fieldnames,
           'REVERSAL_TRIGGER' TO lt_fieldnames,
+          'REVERSAL_BELNR' TO lt_fieldnames,
           'MSG'          TO lt_fieldnames.
 
   LOOP AT git_item INTO gwa_item.
@@ -1286,7 +1287,7 @@ ENDFORM.
 * begin.
 *
 * GIT_ITEM is physically re-sorted here first (NFe Date / NFe Number /
-* Item, all ascending, matching BUILD_SORT_TABLE) instead of relying
+* Cycle / Item, all ascending, matching BUILD_SORT_TABLE) instead of relying
 * on GT_SORT alone - GT_SORT only tells the ALV control how to display
 * the data, it does NOT reorder the underlying internal table, so
 * grouping change detection below would otherwise walk GIT_ITEM in
@@ -1299,7 +1300,7 @@ ENDFORM.
 *---------------------------------------------------------------------*
 FORM build_nota_color.
 
-  SORT git_item BY docdat ASCENDING nfenum ASCENDING itmnum ASCENDING.
+  SORT git_item BY docdat ASCENDING nfenum ASCENDING seqnr ASCENDING itmnum ASCENDING.
 
   DATA lv_last_nfenum TYPE j_1bnfdoc-nfenum.
   DATA lv_first_row   TYPE abap_bool VALUE abap_true.
@@ -1874,22 +1875,11 @@ FORM show_log_popup.
 * Display-only projection of Y0033FI_ICM_LOG: adds the "<code> -
 * <description>" text for STATUS_FROM/STATUS_TO (see
 * STATUS_CODE_TO_DESCR) and picks/orders exactly the columns wanted,
-* instead of showing every raw field of the log table.
-  TYPES: BEGIN OF ty_log_disp,
-           seqnr       TYPE n LENGTH 3,
-           itmnum      TYPE j_1bnflin-itmnum,
-           action      TYPE char20,
-           lognr       TYPE n LENGTH 6,
-           status_from TYPE char40,
-           status_to   TYPE char40,
-           belnr       TYPE belnr_d,
-           gjahr       TYPE gjahr,
-           message     TYPE char200,
-           act_user    TYPE syuname,
-           act_date    TYPE dats,
-           act_time    TYPE tims,
-         END OF ty_log_disp.
-  DATA lt_log_disp TYPE STANDARD TABLE OF ty_log_disp WITH DEFAULT KEY.
+* instead of showing every raw field of the log table. GT_LOG_DISP
+* (TY_LOG_DISP, Y0033FI_ICMS_TOP) is global, not a local table here -
+* see CLASS LCL_LOG_EVENTS for why (it needs to read the row back by
+* index when BELNR is clicked).
+  CLEAR gt_log_disp.
 
   LOOP AT lt_log INTO DATA(ls_log).
     DATA(ls_disp) = VALUE ty_log_disp(
@@ -1897,6 +1887,7 @@ FORM show_log_popup.
       itmnum   = ls_log-itmnum
       action   = ls_log-action
       lognr    = ls_log-lognr
+      bukrs    = ls_log-bukrs
       belnr    = ls_log-belnr
       gjahr    = ls_log-gjahr
       message  = ls_log-message
@@ -1905,13 +1896,13 @@ FORM show_log_popup.
       act_time = ls_log-act_time ).
     PERFORM status_code_to_descr USING ls_log-status_from CHANGING ls_disp-status_from.
     PERFORM status_code_to_descr USING ls_log-status_to   CHANGING ls_disp-status_to.
-    APPEND ls_disp TO lt_log_disp.
+    APPEND ls_disp TO gt_log_disp.
   ENDLOOP.
 
   TRY.
       cl_salv_table=>factory(
         IMPORTING r_salv_table = DATA(lo_salv)
-        CHANGING  t_table      = lt_log_disp ).
+        CHANGING  t_table      = gt_log_disp ).
 
       lo_salv->get_columns( )->set_optimize( abap_true ).
       lo_salv->get_display_settings( )->set_striped_pattern( abap_true ).
@@ -1923,12 +1914,17 @@ FORM show_log_popup.
       lo_columns->get_column( 'LOGNR' )->set_medium_text( 'Log' ).
       lo_columns->get_column( 'STATUS_FROM' )->set_medium_text( 'Status From' ).
       lo_columns->get_column( 'STATUS_TO' )->set_medium_text( 'Status To' ).
+      lo_columns->get_column( 'BUKRS' )->set_technical( abap_true ).  " only needed for the FB03 call, see LCL_LOG_EVENTS
+      " BELNR is clickable (hotspot) - opens FB03. See LCL_LOG_EVENTS.
       lo_columns->get_column( 'BELNR' )->set_medium_text( 'Acc. Document' ).
+      lo_columns->get_column( 'BELNR' )->set_cell_type( if_salv_c_cell_type=>hotspot ).
       lo_columns->get_column( 'GJAHR' )->set_medium_text( 'Year' ).
       lo_columns->get_column( 'MESSAGE' )->set_medium_text( 'Log Message' ).
       lo_columns->get_column( 'ACT_USER' )->set_medium_text( 'User Name' ).
       lo_columns->get_column( 'ACT_DATE' )->set_medium_text( 'Date' ).
       lo_columns->get_column( 'ACT_TIME' )->set_medium_text( 'Time' ).
+
+      SET HANDLER lcl_log_events=>on_link_click FOR lo_salv->get_event( ).
 
       lo_salv->set_screen_popup( start_column = 5
                                   end_column   = 150
@@ -2427,6 +2423,18 @@ FORM build_fieldcat USING pu_mode TYPE c.
   add_field 'PST_TIME'    'Posted at'        10.
   add_field 'REVERSAL_TRIGGER' 'Rev. trigger'    20.
 
+  " REVERSAL_BELNR - the reversal accounting document (distinct from
+  " BELNR_FI, the original posted document) - clickable the same way,
+  " see WHEN 'REVERSAL_BELNR' in LCL_ALV_EVENTS (Y0033FI_ICMS_TOP).
+  " Blank until EXECUTE_REVERSAL (Y0033FI_ICMS_F02) actually reverses
+  " the item.
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'REVERSAL_BELNR'.
+  ls_fcat-coltext   = 'Reversal Doc.'.
+  ls_fcat-outputlen = 12.
+  ls_fcat-hotspot   = abap_true.
+  APPEND ls_fcat TO gt_fcat.
+
   add_field 'MSG' 'Message / Pending' 60.
 
 ENDFORM.
@@ -2448,6 +2456,7 @@ FORM build_sort_table.
 
   APPEND VALUE #( spos = 1 fieldname = 'DOCDAT'  up = abap_true  down = space ) TO gt_sort.
   APPEND VALUE #( spos = 2 fieldname = 'NFENUM'  up = abap_true  down = space ) TO gt_sort.
-  APPEND VALUE #( spos = 3 fieldname = 'ITMNUM'  up = abap_true  down = space ) TO gt_sort.
+  APPEND VALUE #( spos = 3 fieldname = 'SEQNR'   up = abap_true  down = space ) TO gt_sort.
+  APPEND VALUE #( spos = 4 fieldname = 'ITMNUM'  up = abap_true  down = space ) TO gt_sort.
 
 ENDFORM.

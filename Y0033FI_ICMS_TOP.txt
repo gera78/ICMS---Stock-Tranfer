@@ -364,6 +364,28 @@ DATA:
   go_alv_param  TYPE REF TO cl_gui_alv_grid,
   go_cc_param   TYPE REF TO cl_gui_custom_container.
 
+* View Log popup (screen-less, CL_SALV_TABLE) - see Y0033FI_ICMS_F01
+* FORM SHOW_LOG_POPUP and CLASS LCL_LOG_EVENTS below. GT_LOG_DISP is
+* global (not a FORM-local table) purely so LCL_LOG_EVENTS can read the
+* clicked row back by index, same reasoning as GIT_ITEM/LCL_ALV_EVENTS.
+TYPES:
+  BEGIN OF ty_log_disp,
+    seqnr       TYPE n LENGTH 3,
+    itmnum      TYPE j_1bnflin-itmnum,
+    action      TYPE char20,
+    lognr       TYPE n LENGTH 6,
+    status_from TYPE char40,
+    status_to   TYPE char40,
+    bukrs       TYPE bukrs,  " not displayed - only needed to open FB03 with the right company code
+    belnr       TYPE belnr_d,
+    gjahr       TYPE gjahr,
+    message     TYPE char200,
+    act_user    TYPE syuname,
+    act_date    TYPE dats,
+    act_time    TYPE tims,
+  END OF ty_log_disp.
+DATA gt_log_disp TYPE STANDARD TABLE OF ty_log_disp WITH DEFAULT KEY.
+
 *&---------------------------------------------------------------------*
 *& Class LCL_ALV_EVENTS - hotspot click handler (shared)
 *&---------------------------------------------------------------------*
@@ -442,6 +464,17 @@ CLASS lcl_alv_events IMPLEMENTATION.
         SET PARAMETER ID 'GJR' FIELD gwa_item-gjahr_fi.
         CALL TRANSACTION 'FB03' AND SKIP FIRST SCREEN.
 
+      WHEN 'REVERSAL_BELNR'.
+        " Same FB03 pattern as BELNR_FI above, but for the reversal
+        " document (REVERSAL_GJAHR - the original document's own fiscal
+        " year, see EXECUTE_REVERSAL/Y0033FI_ICMS_F02 - a reversal always
+        " posts in the same fiscal year as what it reverses).
+        CHECK gwa_item-reversal_belnr IS NOT INITIAL.
+        SET PARAMETER ID 'BUK' FIELD gwa_item-bukrs.
+        SET PARAMETER ID 'BLN' FIELD gwa_item-reversal_belnr.
+        SET PARAMETER ID 'GJR' FIELD gwa_item-reversal_gjahr.
+        CALL TRANSACTION 'FB03' AND SKIP FIRST SCREEN.
+
       WHEN 'EDOC_GUID'.
         CHECK gwa_item-edoc_guid IS NOT INITIAL.
         " Confirmed pattern, reused from an existing program in this
@@ -464,6 +497,40 @@ CLASS lcl_alv_events IMPLEMENTATION.
           AND RETURN.
 
     ENDCASE.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+*&---------------------------------------------------------------------*
+*& Class LCL_LOG_EVENTS - link-click handler for the View Log popup
+*&---------------------------------------------------------------------*
+*& CL_SALV_TABLE (SHOW_LOG_POPUP, Y0033FI_ICMS_F01) has its own event
+*& model (CL_SALV_EVENTS_TABLE/LINK_CLICK), separate from
+*& CL_GUI_ALV_GRID's HOTSPOT_CLICK handled by LCL_ALV_EVENTS above -
+*& hence a second, dedicated class. Reads GT_LOG_DISP (populated by
+*& SHOW_LOG_POPUP) back by row index, same pattern as LCL_ALV_EVENTS
+*& reading GIT_ITEM.
+*&---------------------------------------------------------------------*
+CLASS lcl_log_events DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS on_link_click
+      FOR EVENT link_click OF cl_salv_events_table
+      IMPORTING row column.
+ENDCLASS.
+
+CLASS lcl_log_events IMPLEMENTATION.
+
+  METHOD on_link_click.
+
+    CHECK column = 'BELNR'.
+    READ TABLE gt_log_disp INTO DATA(ls_log_disp) INDEX row.
+    CHECK sy-subrc = 0 AND ls_log_disp-belnr IS NOT INITIAL.
+
+    SET PARAMETER ID 'BUK' FIELD ls_log_disp-bukrs.
+    SET PARAMETER ID 'BLN' FIELD ls_log_disp-belnr.
+    SET PARAMETER ID 'GJR' FIELD ls_log_disp-gjahr.
+    CALL TRANSACTION 'FB03' AND SKIP FIRST SCREEN.
 
   ENDMETHOD.
 
