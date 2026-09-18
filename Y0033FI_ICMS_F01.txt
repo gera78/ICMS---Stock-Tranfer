@@ -1916,8 +1916,13 @@ FORM show_log_popup.
       lo_columns->get_column( 'STATUS_TO' )->set_medium_text( 'Status To' ).
       lo_columns->get_column( 'BUKRS' )->set_technical( abap_true ).  " only needed for the FB03 call, see LCL_LOG_EVENTS
       " BELNR is clickable (hotspot) - opens FB03. See LCL_LOG_EVENTS.
-      lo_columns->get_column( 'BELNR' )->set_medium_text( 'Acc. Document' ).
-      lo_columns->get_column( 'BELNR' )->set_cell_type( if_salv_c_cell_type=>hotspot ).
+      " SET_CELL_TYPE only exists on CL_SALV_COLUMN_TABLE, not on the
+      " GET_COLUMN return type CL_SALV_COLUMN - an explicit downcast is
+      " required, confirmed via a real activation error ("SET_CELL_TYPE
+      " is unknown") without it.
+      DATA(lo_col_belnr) = CAST cl_salv_column_table( lo_columns->get_column( 'BELNR' ) ).
+      lo_col_belnr->set_medium_text( 'Acc. Document' ).
+      lo_col_belnr->set_cell_type( if_salv_c_cell_type=>hotspot ).
       lo_columns->get_column( 'GJAHR' )->set_medium_text( 'Year' ).
       lo_columns->get_column( 'MESSAGE' )->set_medium_text( 'Log Message' ).
       lo_columns->get_column( 'ACT_USER' )->set_medium_text( 'User Name' ).
