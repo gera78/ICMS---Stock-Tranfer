@@ -95,6 +95,11 @@ CONSTANTS:
 * today's behavior (additive, both run). Once the model is decided,
 * delete these variables together with whichever PERFORM call(s) they
 * guard, in both Y0033FI_ICM_STOCK_TRANSFER and _ADM.
+* NOTE: Y0033FI_ICM_STOCK_TRANSFER_ADM no longer reads these two flags -
+* it has its own P_MODE1/P_MODE2 checkboxes on the selection screen now
+* (Y0033FI_ICMS_SCR_ADM), for the same purpose, kept independently
+* testable from the admin UI. Y0033FI_ICM_STOCK_TRANSFER (user cockpit)
+* still reads these DATA flags directly.
 DATA:
   gc_enable_search_edoc     TYPE abap_bool VALUE abap_true,
   gc_enable_search_transfer TYPE abap_bool VALUE abap_true.
@@ -169,7 +174,9 @@ TYPES ty_r_nfenum TYPE RANGE OF j_1bnfdoc-nfenum.
 TYPES:
   BEGIN OF ty_item,
     sel          TYPE c LENGTH 1,        " ALV row selection checkbox
-    docnum       TYPE j_1bnfdoc-docnum,
+    docnum       TYPE j_1bnfdoc-docnum,  " the candidate's own identity key (DOCNUM+ITMNUM+SEQNR) - destination (DIRECT=1) when found by SELECT_CANDIDATE_DOCUMENTS, origin (DIRECT=2) when found by SELECT_TRANSFER_CANDIDATES; unchanged meaning, do not repurpose
+    docnum_orig  TYPE j_1bnfdoc-docnum,  " origin DOCNUM (DIRECT=2, issuing branch) for this same NFENUM+SERIES+BUKRS - filled by both SELECT_CANDIDATE_DOCUMENTS and SELECT_TRANSFER_CANDIDATES when exactly one DIRECT=2 counterpart exists; blank if not (yet) found. NOT YET PERSISTED - requires a matching DOCNUM_ORIG field on Y0033FI_ICM_ITEM (DDIC change, not done here)
+    docnum_dest  TYPE j_1bnfdoc-docnum,  " destination DOCNUM (DIRECT=1, receiving branch) for this same NFENUM+SERIES+BUKRS - same fill rule/caveat as DOCNUM_ORIG above
     itmnum       TYPE j_1bnflin-itmnum,
     seqnr        TYPE n LENGTH 3,
     nfenum       TYPE j_1bnfdoc-nfenum,
