@@ -364,6 +364,23 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
       AND docdat IN @s_docdat.
   SORT lt_all_nfdoc BY nfenum series.
 
+  " Origin (DIRECT=2) counterpart, same NFENUM+SERIES+BUKRS - looked up
+  " in bulk here purely to record DOCNUM_ORIG alongside DOCNUM (=DOCNUM_DEST,
+  " the DIRECT=1 side this FORM matches on) for traceability. Never gates
+  " candidacy - the DIRECT=1 cardinality check above still decides that
+  " on its own, so a missing/ambiguous DIRECT=2 counterpart just leaves
+  " DOCNUM_ORIG blank instead of anything becoming a LINK_ERROR.
+  SELECT docnum, nfenum, series
+    FROM j_1bnfdoc
+    INTO TABLE @DATA(lt_all_nfdoc_orig)
+    FOR ALL ENTRIES IN @lt_nfe_keys
+    WHERE nfenum = @lt_nfe_keys-nfenum
+      AND series = @lt_nfe_keys-series
+      AND bukrs  = @pu_bukrs
+      AND direct = '2'
+      AND cancel <> 'X'.
+  SORT lt_all_nfdoc_orig BY nfenum series.
+
   SELECT edoc_guid FROM y0033fi_icm_edoc
     INTO TABLE @DATA(lt_edoc_known)
     FOR ALL ENTRIES IN @lt_edoc
@@ -380,6 +397,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     INTO TABLE @lt_lane_all.
 
   DATA lt_candidates LIKE lt_all_nfdoc.
+  DATA lt_orig_candidates LIKE lt_all_nfdoc_orig.
 
   LOOP AT lt_edoc INTO DATA(ls_edoc).
 
@@ -443,8 +461,24 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
       CONTINUE. " not in scope (no lane matched), or configuration error (ambiguous lanes) - neither becomes a candidate
     ENDIF.
 
+    " Origin (DIRECT=2) counterpart - only trusted when exactly one
+    " match exists for this NFENUM+SERIES, same "cardinality must be 1"
+    " reasoning as the DIRECT=1 side above; left blank otherwise.
+    CLEAR lt_orig_candidates.
+    LOOP AT lt_all_nfdoc_orig INTO DATA(ls_orig_row) WHERE nfenum = ls_nfdoc-nfenum AND series = ls_nfdoc-series.
+      APPEND ls_orig_row TO lt_orig_candidates.
+    ENDLOOP.
+    DATA lv_docnum_orig TYPE j_1bnfdoc-docnum.
+    CLEAR lv_docnum_orig.
+    IF lines( lt_orig_candidates ) = 1.
+      READ TABLE lt_orig_candidates INTO DATA(ls_orig) INDEX 1.
+      lv_docnum_orig = ls_orig-docnum.
+    ENDIF.
+
     CLEAR gwa_item.
     gwa_item-docnum      = ls_nfdoc-docnum.
+    gwa_item-docnum_dest = ls_nfdoc-docnum.  " this FORM matches on DIRECT=1 (destination)
+    gwa_item-docnum_orig = lv_docnum_orig.
     gwa_item-nfenum       = ls_nfdoc-nfenum.
     gwa_item-series      = ls_nfdoc-series.
     gwa_item-bukrs       = ls_nfdoc-bukrs.
@@ -585,6 +619,22 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
 
   CHECK lt_transfer IS NOT INITIAL.
 
+  " Destination (DIRECT=1) counterpart, same NFENUM+SERIES+BUKRS - bulk
+  " lookup purely to record DOCNUM_DEST alongside DOCNUM (=DOCNUM_ORIG,
+  " the DIRECT=2 side this FORM matches on) for traceability. Never
+  " gates candidacy - same "informative only" reasoning as DOCNUM_ORIG
+  " in SELECT_CANDIDATE_DOCUMENTS.
+  SELECT docnum, nfenum, series
+    FROM j_1bnfdoc
+    INTO TABLE @DATA(lt_transfer_dest)
+    FOR ALL ENTRIES IN @lt_transfer
+    WHERE nfenum = @lt_transfer-nfenum
+      AND series = @lt_transfer-series
+      AND bukrs  = @pu_bukrs
+      AND direct = '1'
+      AND cancel <> 'X'.
+  SORT lt_transfer_dest BY nfenum series.
+
   " Only notas with at least one line item at a configured CFOP belong
   " to this flow - that item's own CFOP (not just its existence) feeds
   " the LANE match below, one row per DOCNUM (first qualifying line
@@ -654,8 +704,25 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
       INTO @lv_werks_dest
       WHERE j_1bbranch = @lv_dest_branch.
 
+    " Destination (DIRECT=1) counterpart - only trusted when exactly one
+    " match exists for this NFENUM+SERIES, same cardinality reasoning as
+    " SELECT_CANDIDATE_DOCUMENTS; left blank otherwise.
+    DATA lt_dest_candidates LIKE lt_transfer_dest.
+    CLEAR lt_dest_candidates.
+    LOOP AT lt_transfer_dest INTO DATA(ls_dest_row) WHERE nfenum = ls_nfdoc-nfenum AND series = ls_nfdoc-series.
+      APPEND ls_dest_row TO lt_dest_candidates.
+    ENDLOOP.
+    DATA lv_docnum_dest TYPE j_1bnfdoc-docnum.
+    CLEAR lv_docnum_dest.
+    IF lines( lt_dest_candidates ) = 1.
+      READ TABLE lt_dest_candidates INTO DATA(ls_dest) INDEX 1.
+      lv_docnum_dest = ls_dest-docnum.
+    ENDIF.
+
     CLEAR gwa_item.
     gwa_item-docnum      = ls_nfdoc-docnum.
+    gwa_item-docnum_orig = ls_nfdoc-docnum.  " this FORM matches on DIRECT=2 (origin)
+    gwa_item-docnum_dest = lv_docnum_dest.
     gwa_item-nfenum      = ls_nfdoc-nfenum.
     gwa_item-series      = ls_nfdoc-series.
     gwa_item-bukrs       = ls_nfdoc-bukrs.
@@ -1153,6 +1220,8 @@ FORM build_celltab.
   " Every column name that appears in BUILD_FIELDCAT, except SEL.
   DATA lt_fieldnames TYPE TABLE OF lvc_fname.
   APPEND: 'DOCNUM'       TO lt_fieldnames,
+          'DOCNUM_ORIG'  TO lt_fieldnames,
+          'DOCNUM_DEST'  TO lt_fieldnames,
           'NFENUM'       TO lt_fieldnames,
           'ITMNUM'       TO lt_fieldnames,
           'SEQNR'        TO lt_fieldnames,
@@ -2271,6 +2340,15 @@ FORM build_fieldcat USING pu_mode TYPE c.
   ls_fcat-hotspot   = abap_true.
   APPEND ls_fcat TO gt_fcat.
   add_field 'SERIES'      'Series'              4.
+
+  " DOCNUM_ORIG/DOCNUM_DEST - origin/destination DOCNUM for this same
+  " NFENUM+SERIES+BUKRS, resolved by whichever search model found the
+  " candidate (see SELECT_CANDIDATE_DOCUMENTS/SELECT_TRANSFER_CANDIDATES).
+  " Display only for now - NOT YET PERSISTED (Y0033FI_ICM_ITEM has no
+  " matching DDIC fields yet), so these go blank again after a reload
+  " from the DB (View/Admin modes) until that DDIC change is made.
+  add_field 'DOCNUM_ORIG' 'DocNum Orig.'       12.
+  add_field 'DOCNUM_DEST' 'DocNum Dest.'       12.
 
   " MATNR gets its own entry (not the plain macro) so the ALV applies
   " the material number conversion exit (leading zero handling, etc.)
