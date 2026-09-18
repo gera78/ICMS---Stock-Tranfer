@@ -20,24 +20,48 @@ INCLUDE y0033fi_icms_f01.
 *& Main processing
 *&---------------------------------------------------------------------*
 START-OF-SELECTION.
+* Second safety net for P_BUKRS, on top of the AT SELECTION-SCREEN
+* check in Y0033FI_ICMS_SCR_USR (gated on SY-UCOMM = 'ONLI', which a
+* background job never sets) - this one runs unconditionally, so a
+* variant saved with a blank P_BUKRS can't silently run against the
+* fallback/default parameters instead of the real company code's.
+  IF p_bukrs IS INITIAL.
+    MESSAGE 'Enter a Company Code' TYPE 'E'.
+  ENDIF.
+  PERFORM check_bukrs_authority USING p_bukrs.
+
   PERFORM get_company_currency USING p_bukrs CHANGING gv_waers.
   PERFORM get_params USING p_bukrs.
-  PERFORM get_screen_filter USING p_fall p_fatt p_fnew p_fproc p_fclean CHANGING gv_filt.
 
   IF p_mnew = 'X'.
-    PERFORM select_candidate_documents USING p_bukrs.
+    " Same reasoning as the P_BUKRS safety net above - this program has
+    " no SY-BATCH short-circuit, so a variant run in background with
+    " P_MNEW set and every other filter left blank would otherwise
+    " search the company's entire eDocument history unbounded.
+    PERFORM check_search_filters.
+    IF gc_enable_search_edoc = abap_true.
+      PERFORM select_candidate_documents USING p_bukrs.
+    ENDIF.
+    IF gc_enable_search_transfer = abap_true.
+      PERFORM select_transfer_candidates USING p_bukrs.
+    ENDIF.
     PERFORM read_items_and_icms.
     PERFORM determine_benefit_percentage.
     PERFORM filter_active_cycle.
     PERFORM calculate_credit.
     PERFORM flag_not_candidates.
+    PERFORM get_status_filter_search USING p_sre p_snc p_ser CHANGING gr_status_filt.
+    PERFORM apply_status_filter USING gr_status_filt.
   ELSE.
     PERFORM refresh_from_db USING p_bukrs.
-    PERFORM apply_screen_filter USING gv_filt.
+    PERFORM get_status_filter_view USING p_vca p_vrj p_vap p_vpf p_vcb p_vpg p_vpo p_vcd p_vrr p_vrv p_ver
+                                 CHANGING gr_status_filt.
+    PERFORM apply_status_filter USING gr_status_filt.
   ENDIF.
   PERFORM build_celltab.
+  PERFORM build_nota_color.
   PERFORM build_status_icons.
-  PERFORM build_color_tab.
+  PERFORM build_status_descr.
 
 END-OF-SELECTION.
   IF git_item IS INITIAL.

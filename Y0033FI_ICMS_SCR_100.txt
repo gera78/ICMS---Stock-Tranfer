@@ -8,7 +8,21 @@
 *&---------------------------------------------------------------------*
 
 MODULE status_0100 OUTPUT.
-  SET PF-STATUS 'STATUS_0100'.
+* Only show buttons that can actually do something on this screen's
+* mode - Search New Candidates can only Save; View My Candidates
+* cannot Save (nothing new to create), but can Delete/Reject a
+* not-yet-approved candidate, Approve, or Request Reversal.
+  DATA lt_exclude TYPE TABLE OF sy-ucomm.
+  CLEAR lt_exclude.
+  IF p_mnew = 'X'.
+    APPEND 'DEL_CAND' TO lt_exclude.
+    APPEND 'REJECT'   TO lt_exclude.
+    APPEND 'APPROVE'  TO lt_exclude.
+    APPEND 'REQ_REV'  TO lt_exclude.
+  ELSEIF p_mview = 'X'.
+    APPEND 'SAVE' TO lt_exclude.
+  ENDIF.
+  SET PF-STATUS 'STATUS_0100' EXCLUDING lt_exclude.
   SET TITLEBAR 'TITLE_0100'.
 
   IF go_cc IS NOT BOUND.
@@ -33,37 +47,56 @@ MODULE user_command_0100 INPUT.
   CASE gv_ucomm.
     WHEN 'SAVE'.
       IF p_mnew = 'X'.
+        PERFORM ensure_full_docnum_selection.
         PERFORM save_candidates USING gv_id_exec.
         LEAVE TO SCREEN 0. " re-run selection to reflect DB state
       ENDIF.
     WHEN 'DEL_CAND'.
       IF p_mview = 'X'.
+        PERFORM ensure_full_docnum_selection.
         PERFORM delete_candidates.
         PERFORM refresh_from_db USING p_bukrs.
-        PERFORM apply_screen_filter USING gv_filt.
+        PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
+        PERFORM build_nota_color.
         PERFORM build_status_icons.
-        PERFORM build_color_tab.
+        PERFORM build_status_descr.
+        go_alv->refresh_table_display( ).
+      ENDIF.
+    WHEN 'REJECT'.
+      IF p_mview = 'X'.
+        PERFORM ensure_full_docnum_selection.
+        PERFORM reject_candidates.
+        PERFORM refresh_from_db USING p_bukrs.
+        PERFORM apply_status_filter USING gr_status_filt.
+        PERFORM build_celltab.
+        PERFORM build_nota_color.
+        PERFORM build_status_icons.
+        PERFORM build_status_descr.
         go_alv->refresh_table_display( ).
       ENDIF.
     WHEN 'APPROVE'.
       IF p_mview = 'X'.
+        PERFORM ensure_full_docnum_selection.
         PERFORM approve_candidates.
         PERFORM refresh_from_db USING p_bukrs.
-        PERFORM apply_screen_filter USING gv_filt.
+        PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
+        PERFORM build_nota_color.
         PERFORM build_status_icons.
-        PERFORM build_color_tab.
+        PERFORM build_status_descr.
         go_alv->refresh_table_display( ).
       ENDIF.
     WHEN 'REQ_REV'.
       IF p_mview = 'X'.
+        PERFORM ensure_full_docnum_selection.
         PERFORM request_reversal.
         PERFORM refresh_from_db USING p_bukrs.
-        PERFORM apply_screen_filter USING gv_filt.
+        PERFORM apply_status_filter USING gr_status_filt.
         PERFORM build_celltab.
+        PERFORM build_nota_color.
         PERFORM build_status_icons.
-        PERFORM build_color_tab.
+        PERFORM build_status_descr.
         go_alv->refresh_table_display( ).
       ENDIF.
     WHEN 'SEL_ALL'.

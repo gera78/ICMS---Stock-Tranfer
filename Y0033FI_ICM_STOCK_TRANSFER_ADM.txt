@@ -36,6 +36,17 @@ INCLUDE y0033fi_icms_f02.
 *& Main processing
 *&---------------------------------------------------------------------*
 START-OF-SELECTION.
+* Second safety net for P_BUKRS, on top of the AT SELECTION-SCREEN
+* check in Y0033FI_ICMS_SCR_ADM (gated on SY-UCOMM = 'ONLI', which a
+* background job never sets) - this one runs unconditionally, so a
+* variant saved with a blank P_BUKRS can't silently run a background
+* job against the fallback/default parameters instead of the real
+* company code's.
+  IF p_bukrs IS INITIAL.
+    MESSAGE 'Enter a Company Code' TYPE 'E'.
+  ENDIF.
+  PERFORM check_bukrs_authority USING p_bukrs.
+
   PERFORM get_company_currency USING p_bukrs CHANGING gv_waers.
   PERFORM get_params USING p_bukrs.
 
@@ -61,25 +72,42 @@ START-OF-SELECTION.
     RETURN.
   ENDIF.
 
-  PERFORM get_screen_filter USING p_fall p_fatt p_fnew p_fproc p_fclean CHANGING gv_filt.
-
   IF p_mnew = 'X'.
-    " User-style: search new candidates (same chain as the user cockpit)
-    PERFORM select_candidate_documents USING p_bukrs.
+    " User-style: search new candidates (same chain as the user cockpit).
+    " Not reachable from a background job (SY-BATCH already returned
+    " above), but kept for defense-in-depth/consistency with the user
+    " cockpit's own equivalent safety net.
+    PERFORM check_search_filters.
+    " Admin uses its own P_MODE1/P_MODE2 checkboxes (Y0033FI_ICMS_SCR_ADM)
+    " instead of the GC_ENABLE_SEARCH_EDOC/_TRANSFER test switches -
+    " lets the two candidate-search models be isolated/combined per run
+    " without touching code. Y0033FI_ICM_STOCK_TRANSFER (user cockpit)
+    " still uses the GC_ENABLE_SEARCH_* flags directly.
+    IF p_mode1 = abap_true.
+      PERFORM select_candidate_documents USING p_bukrs.
+    ENDIF.
+    IF p_mode2 = abap_true.
+      PERFORM select_transfer_candidates USING p_bukrs.
+    ENDIF.
     PERFORM read_items_and_icms.
     PERFORM determine_benefit_percentage.
     PERFORM filter_active_cycle.
     PERFORM calculate_credit.
     PERFORM flag_not_candidates.
+    PERFORM get_status_filter_search USING p_sre p_snc p_ser CHANGING gr_status_filt.
+    PERFORM apply_status_filter USING gr_status_filt.
   ELSE.
     " User-style view (P_MVIEW) or admin review (P_MADM) - both start
     " from the same persisted data, just shown on different screens.
     PERFORM refresh_from_db USING p_bukrs.
-    PERFORM apply_screen_filter USING gv_filt.
+    PERFORM get_status_filter_view USING p_vca p_vrj p_vap p_vpf p_vcb p_vpg p_vpo p_vcd p_vrr p_vrv p_ver
+                                 CHANGING gr_status_filt.
+    PERFORM apply_status_filter USING gr_status_filt.
   ENDIF.
   PERFORM build_celltab.
+  PERFORM build_nota_color.
   PERFORM build_status_icons.
-  PERFORM build_color_tab.
+  PERFORM build_status_descr.
 
 END-OF-SELECTION.
   IF sy-batch = abap_true.
