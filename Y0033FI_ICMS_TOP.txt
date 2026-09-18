@@ -99,6 +99,18 @@ DATA:
   gc_enable_search_edoc     TYPE abap_bool VALUE abap_true,
   gc_enable_search_transfer TYPE abap_bool VALUE abap_true.
 
+* TEMPORARY SWITCH (TODO Q16): the accounting reference fields built in
+* POST_ONE_DOCUMENT (BAPIACGL09-ALLOC_NMBR/ITEM_TEXT) always use
+* LS_IT-DOCNUM today, which is the DESTINATION nota fiscal's document
+* number for items found via SELECT_CANDIDATE_DOCUMENTS (DIRECT=1).
+* Flip this to use the ORIGIN nota fiscal's document number instead
+* (J_1BNFDOC DIRECT=2, same NFENUM+SERIES+BUKRS) - see
+* RESOLVE_REF_DOCNUM in Y0033FI_ICMS_F02. No DDIC change: resolved at
+* posting time only, never persisted. Defaults to today's behavior
+* (destination) until FI confirms which one they actually want on the
+* accounting document.
+DATA gv_use_orig_docnum_ref TYPE abap_bool VALUE abap_false.
+
 * NOTE: the intercompany-transfer flow's origin branch and CFOP are
 * NOT constants/config fields anymore - they're read straight out of
 * Y0033FI_ICM_LANE (TRANSFER_BRANCH / TRANSFER_CFOP) by

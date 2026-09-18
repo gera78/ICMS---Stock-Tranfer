@@ -206,6 +206,38 @@ FORM post_released_items.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  RESOLVE_REF_DOCNUM
+*&---------------------------------------------------------------------*
+* Returns the DOCNUM to use on the accounting reference fields
+* (ALLOC_NMBR/ITEM_TEXT, see POST_ONE_DOCUMENT) for one item -
+* PU_ITEM-DOCNUM (today's behavior) unless GV_USE_ORIG_DOCNUM_REF
+* (Y0033FI_ICMS_TOP, TODO Q16) is set, in which case the ORIGIN nota
+* fiscal's own J_1BNFDOC row (DIRECT = 2, same NFENUM+SERIES+BUKRS) is
+* looked up instead. Falls back to PU_ITEM-DOCNUM whenever that lookup
+* finds nothing, so this switch can never block a posting that would
+* otherwise succeed. No DDIC change - resolved here, at posting time
+* only, never persisted on Y0033FI_ICM_ITEM.
+*---------------------------------------------------------------------*
+FORM resolve_ref_docnum USING pu_item TYPE y0033fi_icm_item
+                     CHANGING pc_docnum TYPE j_1bdocnum.
+
+  pc_docnum = pu_item-docnum.
+
+  CHECK gv_use_orig_docnum_ref = abap_true.
+
+  SELECT SINGLE docnum FROM j_1bnfdoc
+    INTO @DATA(lv_orig_docnum)
+    WHERE bukrs  = @pu_item-bukrs
+      AND nfenum = @pu_item-nfenum
+      AND series = @pu_item-series
+      AND direct = '2'.
+  IF sy-subrc = 0.
+    pc_docnum = lv_orig_docnum.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  POST_ONE_DOCUMENT
 *&---------------------------------------------------------------------*
 * Posts a single accounting document for a chunk of items belonging
@@ -317,6 +349,10 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
 
     LOOP AT pu_chunk INTO ls_it.
       lv_itemno = lv_itemno + 1.
+
+      DATA lv_ref_docnum TYPE j_1bdocnum.
+      PERFORM resolve_ref_docnum USING ls_it CHANGING lv_ref_docnum.
+
       CLEAR ls_gl.
       ls_gl-itemno_acc = lv_itemno.
       ls_gl-gl_account = gv_gl_debit.
@@ -331,8 +367,8 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       ls_gl-profit_ctr = ls_it-prctr.   " sourced from J_1BNFLIN-PRCTR - may be blank
       ls_gl-material   = ls_it-matnr.
       ls_gl-plant      = ls_it-werks_dest.
-      ls_gl-alloc_nmbr = |{ ls_it-docnum }{ ls_it-itmnum }|.  " TODO (Q16)
-      ls_gl-item_text  = |ICMS benefit { ls_it-docnum }/{ ls_it-itmnum }|.
+      ls_gl-alloc_nmbr = |{ lv_ref_docnum }{ ls_it-itmnum }|.  " TODO (Q16) - see RESOLVE_REF_DOCNUM
+      ls_gl-item_text  = |ICMS benefit { lv_ref_docnum }/{ ls_it-itmnum }|.
       APPEND ls_gl TO lt_gl.
 
       CLEAR ls_cur.
@@ -358,8 +394,8 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       ls_gl-profit_ctr = ls_it-prctr.
       ls_gl-material   = ls_it-matnr.
       ls_gl-plant      = ls_it-werks_dest.
-      ls_gl-alloc_nmbr = |{ ls_it-docnum }{ ls_it-itmnum }|.
-      ls_gl-item_text  = |ICMS benefit { ls_it-docnum }/{ ls_it-itmnum }|.
+      ls_gl-alloc_nmbr = |{ lv_ref_docnum }{ ls_it-itmnum }|.  " TODO (Q16) - see RESOLVE_REF_DOCNUM
+      ls_gl-item_text  = |ICMS benefit { lv_ref_docnum }/{ ls_it-itmnum }|.
       APPEND ls_gl TO lt_gl.
 
       CLEAR ls_cur.
