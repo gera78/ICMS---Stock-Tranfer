@@ -238,6 +238,44 @@ FORM resolve_ref_docnum USING pu_item TYPE y0033fi_icm_item
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  RESOLVE_REF_WERKS
+*&---------------------------------------------------------------------*
+* Same concept as RESOLVE_REF_DOCNUM above, for the accounting
+* document's plant (BAPIACGL09-PLANT, see POST_ONE_DOCUMENT):
+* PU_ITEM-WERKS_DEST (today's behavior, the destination plant) unless
+* GV_USE_ORIG_WERKS_REF (Y0033FI_ICMS_TOP) is set, in which case the
+* ORIGIN nota fiscal's own branch (J_1BNFDOC DIRECT = 2, same
+* NFENUM+SERIES+BUKRS) is resolved to its plant via T001W-J_1BBRANCH -
+* the same branch->plant lookup SELECT_TRANSFER_CANDIDATES already
+* does for the destination side (Y0033FI_ICMS_F01). Falls back to
+* PU_ITEM-WERKS_DEST whenever either lookup finds nothing, so this
+* switch can never block a posting that would otherwise succeed.
+*---------------------------------------------------------------------*
+FORM resolve_ref_werks USING pu_item TYPE y0033fi_icm_item
+                     CHANGING pc_werks TYPE werks_d.
+
+  pc_werks = pu_item-werks_dest.
+
+  CHECK gv_use_orig_werks_ref = abap_true.
+
+  SELECT SINGLE branch FROM j_1bnfdoc
+    INTO @DATA(lv_orig_branch)
+    WHERE bukrs  = @pu_item-bukrs
+      AND nfenum = @pu_item-nfenum
+      AND series = @pu_item-series
+      AND direct = '2'.
+  CHECK sy-subrc = 0.
+
+  SELECT SINGLE werks FROM t001w
+    INTO @DATA(lv_orig_werks)
+    WHERE j_1bbranch = @lv_orig_branch.
+  IF sy-subrc = 0.
+    pc_werks = lv_orig_werks.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  POST_ONE_DOCUMENT
 *&---------------------------------------------------------------------*
 * Posts a single accounting document for a chunk of items belonging
@@ -352,6 +390,8 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
 
       DATA lv_ref_docnum TYPE j_1bdocnum.
       PERFORM resolve_ref_docnum USING ls_it CHANGING lv_ref_docnum.
+      DATA lv_ref_werks TYPE werks_d.
+      PERFORM resolve_ref_werks USING ls_it CHANGING lv_ref_werks.
 
       CLEAR ls_gl.
       ls_gl-itemno_acc = lv_itemno.
@@ -366,7 +406,7 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       " makes the posting fail for this account (blank or not).
       ls_gl-profit_ctr = ls_it-prctr.   " sourced from J_1BNFLIN-PRCTR - may be blank
       ls_gl-material   = ls_it-matnr.
-      ls_gl-plant      = ls_it-werks_dest.
+      ls_gl-plant      = lv_ref_werks.  " TODO (Q16) - see RESOLVE_REF_WERKS
       ls_gl-alloc_nmbr = |{ lv_ref_docnum }{ ls_it-itmnum }|.  " TODO (Q16) - see RESOLVE_REF_DOCNUM
       ls_gl-item_text  = |ICMS benefit { lv_ref_docnum }/{ ls_it-itmnum }|.
       APPEND ls_gl TO lt_gl.
@@ -393,7 +433,7 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       ls_gl-businessplace = ls_it-branch.
       ls_gl-profit_ctr = ls_it-prctr.
       ls_gl-material   = ls_it-matnr.
-      ls_gl-plant      = ls_it-werks_dest.
+      ls_gl-plant      = lv_ref_werks.  " TODO (Q16) - see RESOLVE_REF_WERKS
       ls_gl-alloc_nmbr = |{ lv_ref_docnum }{ ls_it-itmnum }|.  " TODO (Q16) - see RESOLVE_REF_DOCNUM
       ls_gl-item_text  = |ICMS benefit { lv_ref_docnum }/{ ls_it-itmnum }|.
       APPEND ls_gl TO lt_gl.

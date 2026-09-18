@@ -116,6 +116,17 @@ DATA:
 * accounting document.
 DATA gv_use_orig_docnum_ref TYPE abap_bool VALUE abap_false.
 
+* TEMPORARY SWITCH, same concept/reasoning as GV_USE_ORIG_DOCNUM_REF
+* above: BAPIACGL09-PLANT (see POST_ONE_DOCUMENT) always uses
+* LS_IT-WERKS_DEST today, the DESTINATION plant. Flip this to use the
+* ORIGIN nota fiscal's plant instead (its own BRANCH, from the
+* DIRECT=2 J_1BNFDOC counterpart, resolved to WERKS via T001W-
+* J_1BBRANCH - see RESOLVE_REF_WERKS in Y0033FI_ICMS_F02). No DDIC
+* change: resolved at posting time only, never persisted. Defaults to
+* today's behavior (destination) until FI confirms which one they
+* actually want on the accounting document.
+DATA gv_use_orig_werks_ref TYPE abap_bool VALUE abap_false.
+
 * NOTE: the intercompany-transfer flow's origin branch and CFOP are
 * NOT constants/config fields anymore - they're read straight out of
 * Y0033FI_ICM_LANE (TRANSFER_BRANCH / TRANSFER_CFOP) by
