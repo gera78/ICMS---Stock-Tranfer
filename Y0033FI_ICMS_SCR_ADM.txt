@@ -63,6 +63,25 @@ PARAMETERS:
   p_mlane RADIOBUTTON GROUP mod.                         " Maintain Corridors (screen 300)
 SELECTION-SCREEN END OF BLOCK b2.
 
+SELECTION-SCREEN BEGIN OF BLOCK b4 WITH FRAME TITLE TEXT-b04.
+* Candidate-search model switch (P_MNEW only) - replaces the temporary
+* GC_ENABLE_SEARCH_EDOC/GC_ENABLE_SEARCH_TRANSFER DATA flags
+* (Y0033FI_ICMS_TOP) with real checkboxes here, so both models can be
+* isolated/combined per search run without a code change. Decision so
+* far: keep SELECT_CANDIDATE_DOCUMENTS (destination DOCNUM, DIRECT=1)
+* as the primary model (P_MODE1 default 'X'); P_MODE2 (SELECT_TRANSFER_
+* CANDIDATES, DIRECT=2) defaults off, on while the two are validated
+* side by side. See the IF P_MODE1.../IF P_MODE2... guards in
+* Y0033FI_ICM_STOCK_TRANSFER_ADM, START-OF-SELECTION.
+* Y0033FI_ICM_STOCK_TRANSFER (user cockpit) is untouched - it still
+* runs both models unconditionally via the GC_ENABLE_SEARCH_* flags.
+SELECTION-SCREEN BEGIN OF BLOCK b41 WITH FRAME TITLE TEXT-b41.
+  PARAMETERS:
+    p_mode1 TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fs, " Search model: eDocument-driven (DIRECT=1)
+    p_mode2 TYPE char1 AS CHECKBOX DEFAULT ''  MODIF ID fs. " Search model: stock-transfer-driven (DIRECT=2)
+SELECTION-SCREEN END OF BLOCK b41.
+SELECTION-SCREEN END OF BLOCK b4.
+
 SELECTION-SCREEN BEGIN OF BLOCK b3a WITH FRAME TITLE TEXT-b3a.
 * Status filter for "Search New Candidates" (P_MNEW) - every status a
 * fresh search can produce, before anything is saved. All checked by

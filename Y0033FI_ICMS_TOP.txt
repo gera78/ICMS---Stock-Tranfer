@@ -95,6 +95,11 @@ CONSTANTS:
 * today's behavior (additive, both run). Once the model is decided,
 * delete these variables together with whichever PERFORM call(s) they
 * guard, in both Y0033FI_ICM_STOCK_TRANSFER and _ADM.
+* NOTE: Y0033FI_ICM_STOCK_TRANSFER_ADM no longer reads these two flags -
+* it has its own P_MODE1/P_MODE2 checkboxes on the selection screen now
+* (Y0033FI_ICMS_SCR_ADM), for the same purpose, kept independently
+* testable from the admin UI. Y0033FI_ICM_STOCK_TRANSFER (user cockpit)
+* still reads these DATA flags directly.
 DATA:
   gc_enable_search_edoc     TYPE abap_bool VALUE abap_true,
   gc_enable_search_transfer TYPE abap_bool VALUE abap_true.

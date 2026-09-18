@@ -345,6 +345,11 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
   SORT lt_nfe_keys.
   DELETE ADJACENT DUPLICATES FROM lt_nfe_keys.
 
+  " CANCEL <> 'X' excludes a cancelled nota fiscal right at the source -
+  " a cancelled DOCNUM must never become a candidate, and excluding it
+  " here also keeps it out of the cardinality count above (a cancelled
+  " duplicate could otherwise push MATCH_COUNT to 2 and wrongly LINK_ERROR
+  " an otherwise valid single active DOCNUM).
   SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel
     FROM j_1bnfdoc
     INTO TABLE @DATA(lt_all_nfdoc)
@@ -353,6 +358,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
       AND series = @lt_nfe_keys-series
       AND bukrs  = @pu_bukrs
       AND direct = '1'
+      AND cancel <> 'X'
       AND docnum IN @s_docnum
       AND series IN @s_series
       AND docdat IN @s_docdat.
@@ -562,12 +568,15 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
   DATA(lt_nfenum) = s_nfenum[].
   PERFORM pad_nfenum_range CHANGING lt_nfenum.
 
+  " CANCEL <> 'X' - same reasoning as SELECT_CANDIDATE_DOCUMENTS: a
+  " cancelled DOCNUM must never become a candidate here either.
   SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel,
          parid, regio, cnpj_bupla
     FROM j_1bnfdoc
     INTO TABLE @DATA(lt_transfer)
     WHERE bukrs  = @pu_bukrs
       AND direct = '2'
+      AND cancel <> 'X'
       AND branch IN @lr_branch
       AND nfenum IN @lt_nfenum
       AND docnum IN @s_docnum

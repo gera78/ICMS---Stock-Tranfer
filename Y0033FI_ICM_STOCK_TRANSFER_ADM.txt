@@ -78,10 +78,15 @@ START-OF-SELECTION.
     " above), but kept for defense-in-depth/consistency with the user
     " cockpit's own equivalent safety net.
     PERFORM check_search_filters.
-    IF gc_enable_search_edoc = abap_true.
+    " Admin uses its own P_MODE1/P_MODE2 checkboxes (Y0033FI_ICMS_SCR_ADM)
+    " instead of the GC_ENABLE_SEARCH_EDOC/_TRANSFER test switches -
+    " lets the two candidate-search models be isolated/combined per run
+    " without touching code. Y0033FI_ICM_STOCK_TRANSFER (user cockpit)
+    " still uses the GC_ENABLE_SEARCH_* flags directly.
+    IF p_mode1 = abap_true.
       PERFORM select_candidate_documents USING p_bukrs.
     ENDIF.
-    IF gc_enable_search_transfer = abap_true.
+    IF p_mode2 = abap_true.
       PERFORM select_transfer_candidates USING p_bukrs.
     ENDIF.
     PERFORM read_items_and_icms.
