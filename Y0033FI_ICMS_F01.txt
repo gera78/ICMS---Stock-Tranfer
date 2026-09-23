@@ -8,6 +8,55 @@
 *&---------------------------------------------------------------------*
 
 *&---------------------------------------------------------------------*
+*&      Form  CHECK_BUKRS_AUTHORITY
+*&---------------------------------------------------------------------*
+* Company-code authorization gate, via the standard FI object
+* F_BKPF_BUK (the same one real posting/reversal transactions check),
+* ACTVT 03 (Display) - the minimum needed to work with this company's
+* data in this program at all (search, view, approve, post, reverse).
+* Without this, any user able to run the program could act on ANY
+* company code typed into P_BUKRS, regardless of their real FI
+* authorization. Called from every entry point that validates P_BUKRS
+* (both main programs' selection screens and their START-OF-SELECTION
+* background safety net), right next to the existing "Enter a Company
+* Code" check.
+*---------------------------------------------------------------------*
+FORM check_bukrs_authority USING pu_bukrs TYPE bukrs.
+
+  AUTHORITY-CHECK OBJECT 'F_BKPF_BUK'
+    ID 'BUKRS' FIELD pu_bukrs
+    ID 'ACTVT' FIELD '03'.
+  IF sy-subrc <> 0.
+    MESSAGE |No FI authorization for company code { pu_bukrs }| TYPE 'E'.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_SEARCH_FILTERS
+*&---------------------------------------------------------------------*
+* "Search New Candidates" (P_MNEW) reads EDOCUMENT/EDOBRINCOMING -
+* company-wide tables with no built-in scoping of their own (see
+* SELECT_CANDIDATE_DOCUMENTS) - P_BUKRS alone does not limit that read
+* at all. Left completely open (every one of these select-options
+* empty), a search would walk the company's entire eDocument history
+* in one go, both slow and - per the earlier fix - still capable of
+* writing a Y0033FI_ICM_EDOC row for every LINK_ERROR found along the
+* way. Require at least one other filter to narrow it down first.
+* "View My Candidates" is not checked here - it only ever reads our
+* own already-bounded Y0033FI_ICM_ITEM data, not the company-wide
+* eDocument tables.
+*---------------------------------------------------------------------*
+FORM check_search_filters.
+
+  IF s_datum[]  IS INITIAL AND s_nfenum[] IS INITIAL AND s_docnum[] IS INITIAL
+     AND s_series[] IS INITIAL AND s_docdat[] IS INITIAL AND s_acckey[] IS INITIAL.
+    MESSAGE 'Fill in at least one filter besides Company Code' TYPE 'E'.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  GET_COMPANY_CURRENCY
 *&---------------------------------------------------------------------*
 FORM get_company_currency USING pu_bukrs TYPE bukrs
@@ -54,31 +103,86 @@ FORM get_params USING pu_bukrs TYPE bukrs.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
-*&      Form  GET_SCREEN_FILTER
+*&      Form  GET_STATUS_FILTER_SEARCH
 *&---------------------------------------------------------------------*
-* Translates the four filter radio buttons (P_FALL/P_FATT/P_FNEW/
-* P_FPROC, declared in Y0033FI_ICMS_SCR_USR / _SCR_ADM) into the
-* single CHAR1 code that FORM APPLY_SCREEN_FILTER already works with.
+* Builds the status range for "Search New Candidates" from the three
+* checkboxes declared in Y0033FI_ICMS_SCR_USR / _SCR_ADM (MODIF ID FS)
+* - one per status a fresh search can possibly produce, before saving.
 *---------------------------------------------------------------------*
-FORM get_screen_filter USING pu_fall  TYPE char1
-                              pu_fatt  TYPE char1
-                              pu_fnew  TYPE char1
-                              pu_fproc TYPE char1
-                              pu_fclean TYPE char1
-                     CHANGING pc_filter TYPE char1.
-
-  IF pu_fall = abap_true.
-    pc_filter = gc_filter-all.
-  ELSEIF pu_fatt = abap_true.
-    pc_filter = gc_filter-attention.
-  ELSEIF pu_fnew = abap_true.
-    pc_filter = gc_filter-new_cand.
-  ELSEIF pu_fproc = abap_true.
-    pc_filter = gc_filter-processed.
-  ELSEIF pu_fclean = abap_true.
-    pc_filter = gc_filter-clean.
+FORM get_status_filter_search USING pu_sre TYPE char1
+                                     pu_snc TYPE char1
+                                     pu_ser TYPE char1
+                            CHANGING pc_range TYPE ty_r_status.
+  CLEAR pc_range.
+  IF pu_sre = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-ready_to_save ) TO pc_range.
   ENDIF.
+  IF pu_snc = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-not_candidate ) TO pc_range.
+  ENDIF.
+  IF pu_ser = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-error ) TO pc_range.
+  ENDIF.
+ENDFORM.
 
+*&---------------------------------------------------------------------*
+*&      Form  GET_STATUS_FILTER_VIEW
+*&---------------------------------------------------------------------*
+* Builds the status range for "View My Candidates" (and the admin
+* review screen) from the eleven checkboxes declared in
+* Y0033FI_ICMS_SCR_USR / _SCR_ADM (MODIF ID FV) - one per status a
+* saved/persisted item can be in.
+*---------------------------------------------------------------------*
+FORM get_status_filter_view USING pu_vca TYPE char1
+                                   pu_vrj TYPE char1
+                                   pu_vap TYPE char1
+                                   pu_vpf TYPE char1
+                                   pu_vcb TYPE char1
+                                   pu_vpg TYPE char1
+                                   pu_vpo TYPE char1
+                                   pu_vcd TYPE char1
+                                   pu_vrr TYPE char1
+                                   pu_vrv TYPE char1
+                                   pu_ver TYPE char1
+                          CHANGING pc_range TYPE ty_r_status.
+  CLEAR pc_range.
+  IF pu_vca = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-candidate ) TO pc_range.
+  ENDIF.
+  IF pu_vrj = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-rejected ) TO pc_range.
+  ENDIF.
+  " 021 (Auto Approved) rides on the same checkbox as 020 (Approved) -
+  " same meaning for the flow (waiting for admin to post), so no extra
+  " checkbox/parameter was added to the selection screens.
+  IF pu_vap = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-approved ) TO pc_range.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-auto_approved ) TO pc_range.
+  ENDIF.
+  IF pu_vpf = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-post_failed ) TO pc_range.
+  ENDIF.
+  IF pu_vcb = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-cancelled_pre_post ) TO pc_range.
+  ENDIF.
+  IF pu_vpg = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-posting ) TO pc_range.
+  ENDIF.
+  IF pu_vpo = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-posted ) TO pc_range.
+  ENDIF.
+  IF pu_vcd = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-cancel_detected ) TO pc_range.
+  ENDIF.
+  IF pu_vrr = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-reversal_requested ) TO pc_range.
+  ENDIF.
+  IF pu_vrv = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-reversed ) TO pc_range.
+  ENDIF.
+  IF pu_ver = abap_true.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_status-error ) TO pc_range.
+  ENDIF.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -89,7 +193,8 @@ ENDFORM.
 * specific matching row (highest MATCH_LEVEL) wins; a tie at the top
 * level is a configuration error - never guessed.
 *---------------------------------------------------------------------*
-FORM match_lane USING pu_key TYPE ty_lane_key
+FORM match_lane USING pu_key      TYPE ty_lane_key
+                       pu_lt_lane TYPE ty_it_lane
               CHANGING pc_origin_region TYPE t005u-bland
                        pc_dest_region   TYPE t005u-bland
                        pc_match_level   TYPE n
@@ -98,18 +203,30 @@ FORM match_lane USING pu_key TYPE ty_lane_key
   CLEAR: pc_origin_region, pc_dest_region, pc_match_level.
   pc_subrc = 4. " default: no match
 
-  SELECT * FROM y0033fi_icm_lane
-    INTO TABLE @DATA(lt_lane)
-    WHERE active     = @abap_true
-      AND valid_from <= @sy-datum
-      AND valid_to   >= @sy-datum
-      AND ( bukrs         = @pu_key-bukrs         OR bukrs         = @space )
-      AND ( vendor_code   = @pu_key-vendor_code   OR vendor_code   = @space )
-      AND ( vendor_tax_id = @pu_key-vendor_tax_id OR vendor_tax_id = @space )
-      AND ( vendor_region = @pu_key-vendor_region OR vendor_region = @space )
-      AND ( country       = @pu_key-country       OR country       = @space )
-      AND ( plant_code    = @pu_key-plant_code    OR plant_code    = @space )
-      AND ( plant_region  = @pu_key-plant_region  OR plant_region  = @space ).
+  " PU_LT_LANE is the whole Y0033FI_ICM_LANE table, read ONCE by the
+  " caller (SELECT_CANDIDATE_DOCUMENTS) instead of here - this FORM
+  " used to run its own SELECT on every single call (once per
+  " candidate row), which was one of the main causes of a slow search
+  " with many eDocuments; Y0033FI_ICM_LANE is a small config table that
+  " does not change during a single search run, so reading it once and
+  " filtering in memory (same conditions as the old SELECT) is both
+  " safe and far cheaper.
+  DATA lt_lane TYPE ty_it_lane.
+  LOOP AT pu_lt_lane INTO DATA(ls_lane_row)
+    WHERE active     = abap_true
+      AND valid_from <= sy-datum
+      AND valid_to   >= sy-datum
+      AND ( bukrs         = pu_key-bukrs         OR bukrs         = space )
+      AND ( vendor_code   = pu_key-vendor_code   OR vendor_code   = space )
+      AND ( vendor_tax_id = pu_key-vendor_tax_id OR vendor_tax_id = space )
+      AND ( vendor_region = pu_key-vendor_region OR vendor_region = space )
+      AND ( country       = pu_key-country       OR country       = space )
+      AND ( plant_code    = pu_key-plant_code    OR plant_code    = space )
+      AND ( plant_region  = pu_key-plant_region  OR plant_region  = space )
+      AND ( transfer_cfop   = pu_key-transfer_cfop   OR transfer_cfop   = space )
+      AND ( transfer_branch = pu_key-transfer_branch OR transfer_branch = space ).
+    APPEND ls_lane_row TO lt_lane.
+  ENDLOOP.
 
   CHECK lt_lane IS NOT INITIAL.
 
@@ -133,6 +250,30 @@ FORM match_lane USING pu_key TYPE ty_lane_key
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  PAD_NFENUM_RANGE
+*&---------------------------------------------------------------------*
+* S_NFENUM accepts values typed without leading zeros (e.g. "273398"
+* instead of "000273398") - pads LOW/HIGH to the field's real,
+* zero-padded format via the ALPHA conversion exit, so a bare entry
+* still matches. Used by both SELECT_CANDIDATE_DOCUMENTS (search) and
+* REFRESH_FROM_DB (view) before filtering by NFENUM.
+*---------------------------------------------------------------------*
+FORM pad_nfenum_range CHANGING pc_range TYPE ty_r_nfenum.
+  LOOP AT pc_range ASSIGNING FIELD-SYMBOL(<ls_nfenum>).
+    IF <ls_nfenum>-low IS NOT INITIAL.
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING input  = <ls_nfenum>-low
+        IMPORTING output = <ls_nfenum>-low.
+    ENDIF.
+    IF <ls_nfenum>-high IS NOT INITIAL.
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING input  = <ls_nfenum>-high
+        IMPORTING output = <ls_nfenum>-high.
+    ENDIF.
+  ENDLOOP.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  SELECT_CANDIDATE_DOCUMENTS
 *&---------------------------------------------------------------------*
 * Selects candidates from EDOCUMENT (EDOC_TYPE = BR_IN_ST, PROC_STATUS
@@ -148,6 +289,9 @@ ENDFORM.
 * and do NOT become a candidate.
 *---------------------------------------------------------------------*
 FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
+
+  DATA(lt_nfenum) = s_nfenum[].
+  PERFORM pad_nfenum_range CHANGING lt_nfenum.
 
   SELECT edoc_guid, proc_status, process, create_date
     FROM edocument
@@ -168,14 +312,106 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     FROM edobrincoming
     INTO TABLE @DATA(lt_inc)
     FOR ALL ENTRIES IN @lt_edoc
+    WHERE edoc_guid = @lt_edoc-edoc_guid
+      AND accesskey IN @s_acckey.
+  " NOTE: do NOT filter this SELECT by EDOBRINCOMING-COMPANY_CODE = PU_BUKRS -
+  " tried once, broke every candidate (that field doesn't reliably match
+  " PU_BUKRS/BUKRS for legitimate rows). The real company scoping already
+  " happens below, on the J_1BNFDOC read (WHERE BUKRS = PU_BUKRS) - a GUID
+  " belonging to another company simply won't resolve a DOCNUM there and
+  " ends up as LINK_ERROR, same as any other unresolved GUID.
+
+  CHECK lt_inc IS NOT INITIAL.
+  SORT lt_inc BY edoc_guid.
+
+  " The following three reads used to happen ONE ROW AT A TIME inside
+  " the LOOP below (one J_1BNFDOC SELECT and one Y0033FI_ICM_EDOC
+  " SELECT SINGLE per eDocument, one Y0033FI_ICM_LANE SELECT per
+  " candidate that got this far) - hundreds of eDocuments meant
+  " hundreds of sequential round trips, the main cause of a slow
+  " search. All three are now read once, in bulk, before the loop.
+  "
+  " EDOBRINCOMING-NFENUM/SERIES are NOT the same data elements as
+  " J_1BNFDOC-NFENUM/SERIES (same names, different types/lengths - see
+  " the same warning in SYNC_EDOC_TRACKING below), so FOR ALL ENTRIES
+  " can't compare them directly ("fields must have the same type and
+  " length"). Converting into a driving table typed against
+  " J_1BNFDOC's own fields first, via VALUE (implicit MOVE
+  " conversion), satisfies that check.
+  TYPES: BEGIN OF ty_nfe_key,
+           nfenum TYPE j_1bnfdoc-nfenum,
+           series TYPE j_1bnfdoc-series,
+         END OF ty_nfe_key.
+  DATA lt_nfe_keys TYPE STANDARD TABLE OF ty_nfe_key WITH DEFAULT KEY.
+  LOOP AT lt_inc INTO DATA(ls_inc_key).
+    APPEND VALUE #( nfenum = ls_inc_key-nfenum series = ls_inc_key-series ) TO lt_nfe_keys.
+  ENDLOOP.
+  SORT lt_nfe_keys.
+  DELETE ADJACENT DUPLICATES FROM lt_nfe_keys.
+
+  " CANCEL <> 'X' excludes a cancelled nota fiscal right at the source -
+  " a cancelled DOCNUM must never become a candidate, and excluding it
+  " here also keeps it out of the cardinality count above (a cancelled
+  " duplicate could otherwise push MATCH_COUNT to 2 and wrongly LINK_ERROR
+  " an otherwise valid single active DOCNUM).
+  SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel
+    FROM j_1bnfdoc
+    INTO TABLE @DATA(lt_all_nfdoc)
+    FOR ALL ENTRIES IN @lt_nfe_keys
+    WHERE nfenum = @lt_nfe_keys-nfenum
+      AND series = @lt_nfe_keys-series
+      AND bukrs  = @pu_bukrs
+      AND direct = '1'
+      AND cancel <> 'X'
+      AND docnum IN @s_docnum
+      AND series IN @s_series
+      AND docdat IN @s_docdat.
+  SORT lt_all_nfdoc BY nfenum series.
+
+  " Origin (DIRECT=2) counterpart, same NFENUM+SERIES+BUKRS - looked up
+  " in bulk here purely to record DOCNUM_ORIG alongside DOCNUM (=DOCNUM_DEST,
+  " the DIRECT=1 side this FORM matches on) for traceability. Never gates
+  " candidacy - the DIRECT=1 cardinality check above still decides that
+  " on its own, so a missing/ambiguous DIRECT=2 counterpart just leaves
+  " DOCNUM_ORIG blank instead of anything becoming a LINK_ERROR.
+  SELECT docnum, nfenum, series
+    FROM j_1bnfdoc
+    INTO TABLE @DATA(lt_all_nfdoc_orig)
+    FOR ALL ENTRIES IN @lt_nfe_keys
+    WHERE nfenum = @lt_nfe_keys-nfenum
+      AND series = @lt_nfe_keys-series
+      AND bukrs  = @pu_bukrs
+      AND direct = '2'
+      AND cancel <> 'X'.
+  SORT lt_all_nfdoc_orig BY nfenum series.
+
+  SELECT edoc_guid FROM y0033fi_icm_edoc
+    INTO TABLE @DATA(lt_edoc_known)
+    FOR ALL ENTRIES IN @lt_edoc
     WHERE edoc_guid = @lt_edoc-edoc_guid.
+  SORT lt_edoc_known BY table_line.
+
+  " Declared explicitly (not inline @DATA(...)) so it comes out WITH
+  " DEFAULT KEY, matching MATCH_LANE's PU_LT_LANE parameter type
+  " (TY_IT_LANE) - an inline SELECT ... INTO TABLE @DATA(...) always
+  " creates a WITH EMPTY KEY table instead, which PERFORM rejects as
+  " an incompatible type even though the row type is identical.
+  DATA lt_lane_all TYPE ty_it_lane.
+  SELECT * FROM y0033fi_icm_lane
+    INTO TABLE @lt_lane_all.
+
+  DATA lt_candidates LIKE lt_all_nfdoc.
+  DATA lt_orig_candidates LIKE lt_all_nfdoc_orig.
 
   LOOP AT lt_edoc INTO DATA(ls_edoc).
 
-    READ TABLE lt_inc INTO DATA(ls_inc) WITH KEY edoc_guid = ls_edoc-edoc_guid.
+    READ TABLE lt_inc INTO DATA(ls_inc) WITH KEY edoc_guid = ls_edoc-edoc_guid BINARY SEARCH.
     IF sy-subrc <> 0.
       CONTINUE. " no EDOBRINCOMING row yet - covered by the "orphan" gap noted in the DDIC spec, not this form
     ENDIF.
+
+    READ TABLE lt_edoc_known WITH KEY table_line = ls_edoc-edoc_guid TRANSPORTING NO FIELDS BINARY SEARCH.
+    DATA(lv_already_known) = xsdbool( sy-subrc = 0 ).
 
     " Resolve DOCNUM - cardinality must be exactly 1.
     " DIRECT = 1 (Incoming) is required: both the issuing plant and
@@ -183,13 +419,10 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     " fiscal, in opposite directions - without this filter, the
     " NFENUM+SERIES match would routinely return 2 candidates instead
     " of 1, even for a perfectly normal transfer.
-    SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel
-      FROM j_1bnfdoc
-      INTO TABLE @DATA(lt_candidates)
-      WHERE nfenum = @ls_inc-nfenum
-        AND series = @ls_inc-series
-        AND bukrs  = @pu_bukrs
-        AND direct = '1'.
+    CLEAR lt_candidates.
+    LOOP AT lt_all_nfdoc INTO DATA(ls_nfdoc_row) WHERE nfenum = ls_inc-nfenum AND series = ls_inc-series.
+      APPEND ls_nfdoc_row TO lt_candidates.
+    ENDLOOP.
 
     DATA lv_match_count TYPE n LENGTH 1.
     lv_match_count = COND #( WHEN lines( lt_candidates ) > 9 THEN 9 ELSE lines( lt_candidates ) ).
@@ -198,7 +431,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
       " STATUS = LINK_ERROR, no candidate - see FORM SYNC_EDOC_TRACKING
       " for the row upsert logic; a lightweight upsert here too so the
       " problem is visible immediately, not only after the next sync.
-      PERFORM upsert_edoc_link_error USING ls_edoc-edoc_guid ls_inc lv_match_count ls_edoc-process ls_edoc-proc_status.
+      PERFORM upsert_edoc_link_error USING ls_edoc-edoc_guid ls_inc lv_match_count ls_edoc-process ls_edoc-proc_status ls_inc-accesskey lv_already_known.
       CONTINUE.
     ENDIF.
 
@@ -207,9 +440,9 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     " Track this GUID now, regardless of whether it ends up eligible
     " (lane match below) - Y0033FI_ICM_EDOC records every GUID we have
     " successfully linked, not only the ones that became candidates.
-    PERFORM upsert_edoc_active USING ls_edoc-edoc_guid ls_nfdoc-docnum ls_inc ls_edoc-process ls_edoc-proc_status.
+    PERFORM upsert_edoc_active USING ls_edoc-edoc_guid ls_nfdoc-docnum ls_inc ls_edoc-process ls_edoc-proc_status ls_inc-accesskey lv_already_known.
 
-    CHECK ls_nfdoc-nfenum IN s_nfenum. " S_NFENUM filter (screen selection) - applies only to what becomes visible, not to tracking above
+    CHECK ls_nfdoc-nfenum IN lt_nfenum. " S_NFENUM filter (screen selection, zero-padded above) - applies only to what becomes visible, not to tracking above
 
     " Eligibility + origin/destination via Y0033FI_ICM_LANE (Q1 resolved)
     DATA(ls_lane_key) = VALUE ty_lane_key(
@@ -225,15 +458,31 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     DATA lv_dest   TYPE t005u-bland.
     DATA lv_level  TYPE n LENGTH 1.
     DATA lv_lane_subrc TYPE sy-subrc.
-    PERFORM match_lane USING ls_lane_key
+    PERFORM match_lane USING ls_lane_key lt_lane_all
                      CHANGING lv_origin lv_dest lv_level lv_lane_subrc.
 
     IF lv_lane_subrc <> 0.
       CONTINUE. " not in scope (no lane matched), or configuration error (ambiguous lanes) - neither becomes a candidate
     ENDIF.
 
+    " Origin (DIRECT=2) counterpart - only trusted when exactly one
+    " match exists for this NFENUM+SERIES, same "cardinality must be 1"
+    " reasoning as the DIRECT=1 side above; left blank otherwise.
+    CLEAR lt_orig_candidates.
+    LOOP AT lt_all_nfdoc_orig INTO DATA(ls_orig_row) WHERE nfenum = ls_nfdoc-nfenum AND series = ls_nfdoc-series.
+      APPEND ls_orig_row TO lt_orig_candidates.
+    ENDLOOP.
+    DATA lv_docnum_orig TYPE j_1bnfdoc-docnum.
+    CLEAR lv_docnum_orig.
+    IF lines( lt_orig_candidates ) = 1.
+      READ TABLE lt_orig_candidates INTO DATA(ls_orig) INDEX 1.
+      lv_docnum_orig = ls_orig-docnum.
+    ENDIF.
+
     CLEAR gwa_item.
     gwa_item-docnum      = ls_nfdoc-docnum.
+    gwa_item-docnum_dest = ls_nfdoc-docnum.  " this FORM matches on DIRECT=1 (destination)
+    gwa_item-docnum_orig = lv_docnum_orig.
     gwa_item-nfenum       = ls_nfdoc-nfenum.
     gwa_item-series      = ls_nfdoc-series.
     gwa_item-bukrs       = ls_nfdoc-bukrs.
@@ -246,9 +495,252 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     gwa_item-lane_match_level = lv_level.
     gwa_item-werks_dest  = ls_inc-plant.
     gwa_item-edoc_guid   = ls_edoc-edoc_guid.
-    gwa_item-accesskey   = ls_inc-accesskey.
     gwa_item-materialdoc = ls_inc-materialdoc.
     gwa_item-materialdoc_year = ls_inc-materialdoc_year.
+
+    APPEND gwa_item TO git_item.
+
+  ENDLOOP.
+
+  " Single commit for every UPSERT_EDOC_ACTIVE/UPSERT_EDOC_LINK_ERROR
+  " done above - those used to COMMIT WORK AND WAIT on every single
+  " row themselves (a synchronous round trip per row, waiting for the
+  " database to confirm each one), by far the single biggest cost in a
+  " search with any real number of eDocuments.
+  COMMIT WORK AND WAIT.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  SELECT_TRANSFER_CANDIDATES
+*&---------------------------------------------------------------------*
+* Second, independent candidate source, for the intercompany stock
+* transfer flow: J_1BNFDOC itself (DIRECT = '2', emitted at the ORIGIN
+* branch) is the fato gerador here - the ICMS benefit gets calculated
+* right away, without waiting for the destination branch to download
+* the NF-e and create an eDocument. EDOCUMENT/EDOBRINCOMING never come
+* into this path at all - if/when the eDocument for this same NFe
+* later shows up at the destination, SYNC_EDOC_TRACKING links it into
+* Y0033FI_ICM_EDOC same as any other GUID, purely as a "confirmed
+* arrival" record; it never gates this candidate.
+*
+* "This flow" is decided entirely by Y0033FI_ICM_LANE now, the same
+* table that already decides eligibility/benefit % for this flow -
+* nothing hardcoded, nothing in a separate config table:
+*   - TRANSFER_BRANCH (non-blank rows) lists the origin branches in
+*     scope - narrows the initial J_1BNFDOC-BRANCH read below. A
+*     DEDICATED CHAR4 field, not VENDOR_CODE (CHAR10): reusing
+*     VENDOR_CODE for a branch caused a real ALPHA/zero-pad conversion
+*     bug ("0006" saved/read back as "0000") - see TY_LANE_KEY,
+*     Y0033FI_ICMS_TOP. VENDOR_CODE stays free for its own real-vendor
+*     meaning, still used as-is by the eDocument-driven flow.
+*   - TRANSFER_CFOP (non-blank rows) lists the qualifying CFOPs - blank
+*     = wildcard like the other LANE key fields. Narrows the
+*     J_1BNFLIN read below, and the matched item's own CFOP feeds
+*     MATCH_LANE per document, so a lane can require a specific CFOP
+*     or accept any.
+* A LANE row with blank TRANSFER_BRANCH/TRANSFER_CFOP still only
+* matches THIS flow if TRANSFER_CFOP is blank too (see MATCH_LANE) -
+* existing eDocument-flow rows (which never set TRANSFER_CFOP) are
+* unaffected.
+*
+* PARID encodes the destination branch, as BUKRS (no leading zeros) +
+* BRANCH - confirmed against a real document pair (BUKRS 0033/BRANCH
+* 0006, PARID '330005' pointing at branch 0005, same CNPJ root
+* 46.389.383 on both CGC and CNPJ_BUPLA, just a different branch
+* suffix). Taking the LAST 4 characters recovers BRANCH regardless of
+* how many digits BUKRS occupies - this was derived from a single
+* sample document, so confirm it still holds for a company code whose
+* BUKRS isn't "0033" before relying on it for real postings.
+*
+* MATCH_LANE itself is untouched apart from the added TRANSFER_BRANCH
+* field - some of its other generic key fields are reused with a
+* different meaning for this flow (lane maintenance for these rows
+* keys on branch, not a real vendor):
+*   TRANSFER_BRANCH = origin branch (this doc's own BRANCH)
+*   VENDOR_CODE   = blank - not used by this flow, left free for the
+*                   eDocument flow's real-vendor meaning
+*   VENDOR_TAX_ID = origin CNPJ (CNPJ_BUPLA)
+*   VENDOR_REGION = blank - not on the header for the origin side;
+*                   TRANSFER_BRANCH above is already an exact,
+*                   unambiguous key on its own
+*   PLANT_CODE    = destination branch (from PARID) - not a real plant
+*                   (WERKS) yet, see the T001W lookup below
+*   PLANT_REGION  = destination region - already on the header
+*                   (J_1BNFDOC-REGIO is the BR partner's own region)
+*---------------------------------------------------------------------*
+FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
+
+  DATA lt_lane_all TYPE ty_it_lane.
+  SELECT * FROM y0033fi_icm_lane
+    INTO TABLE @lt_lane_all.
+
+  " Candidate origin branches = every non-blank TRANSFER_BRANCH
+  " configured for this BUKRS - narrows the J_1BNFDOC read below. A
+  " blank TRANSFER_BRANCH (wildcard) can't narrow anything and is
+  " excluded here; it's still honored later, per document, by
+  " MATCH_LANE itself.
+  TYPES ty_r_branch TYPE RANGE OF j_1bnfdoc-branch.
+  DATA lr_branch TYPE ty_r_branch.
+  LOOP AT lt_lane_all INTO DATA(ls_lane_b)
+    WHERE bukrs = pu_bukrs AND transfer_branch IS NOT INITIAL.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_lane_b-transfer_branch ) TO lr_branch.
+  ENDLOOP.
+  SORT lr_branch.
+  DELETE ADJACENT DUPLICATES FROM lr_branch.
+  CHECK lr_branch IS NOT INITIAL. " nothing configured for this flow at this BUKRS
+
+  " Candidate CFOPs = every non-blank TRANSFER_CFOP configured for this
+  " BUKRS - narrows the J_1BNFLIN read below. Same wildcard reasoning
+  " as VENDOR_CODE above.
+  TYPES ty_r_cfop TYPE RANGE OF char10.
+  DATA lr_cfop TYPE ty_r_cfop.
+  LOOP AT lt_lane_all INTO DATA(ls_lane_c)
+    WHERE bukrs = pu_bukrs AND transfer_cfop IS NOT INITIAL.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_lane_c-transfer_cfop ) TO lr_cfop.
+  ENDLOOP.
+  SORT lr_cfop.
+  DELETE ADJACENT DUPLICATES FROM lr_cfop.
+  CHECK lr_cfop IS NOT INITIAL.
+
+  DATA(lt_nfenum) = s_nfenum[].
+  PERFORM pad_nfenum_range CHANGING lt_nfenum.
+
+  " CANCEL <> 'X' - same reasoning as SELECT_CANDIDATE_DOCUMENTS: a
+  " cancelled DOCNUM must never become a candidate here either.
+  SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel,
+         parid, regio, cnpj_bupla
+    FROM j_1bnfdoc
+    INTO TABLE @DATA(lt_transfer)
+    WHERE bukrs  = @pu_bukrs
+      AND direct = '2'
+      AND cancel <> 'X'
+      AND branch IN @lr_branch
+      AND nfenum IN @lt_nfenum
+      AND docnum IN @s_docnum
+      AND series IN @s_series
+      AND docdat IN @s_docdat.
+
+  CHECK lt_transfer IS NOT INITIAL.
+
+  " Destination (DIRECT=1) counterpart, same NFENUM+SERIES+BUKRS - bulk
+  " lookup purely to record DOCNUM_DEST alongside DOCNUM (=DOCNUM_ORIG,
+  " the DIRECT=2 side this FORM matches on) for traceability. Never
+  " gates candidacy - same "informative only" reasoning as DOCNUM_ORIG
+  " in SELECT_CANDIDATE_DOCUMENTS.
+  SELECT docnum, nfenum, series
+    FROM j_1bnfdoc
+    INTO TABLE @DATA(lt_transfer_dest)
+    FOR ALL ENTRIES IN @lt_transfer
+    WHERE nfenum = @lt_transfer-nfenum
+      AND series = @lt_transfer-series
+      AND bukrs  = @pu_bukrs
+      AND direct = '1'
+      AND cancel <> 'X'.
+  SORT lt_transfer_dest BY nfenum series.
+
+  " Only notas with at least one line item at a configured CFOP belong
+  " to this flow - that item's own CFOP (not just its existence) feeds
+  " the LANE match below, one row per DOCNUM (first qualifying line
+  " wins if a nota mixes CFOPs - same "one match per document"
+  " simplification the rest of this FORM already relies on).
+  TYPES: BEGIN OF ty_cfop_hit,
+           docnum TYPE j_1bnflin-docnum,
+           cfop   TYPE j_1bnflin-cfop,
+         END OF ty_cfop_hit.
+  DATA lt_cfop_hit TYPE STANDARD TABLE OF ty_cfop_hit WITH DEFAULT KEY.
+  SELECT docnum, cfop FROM j_1bnflin
+    INTO TABLE @lt_cfop_hit
+    FOR ALL ENTRIES IN @lt_transfer
+    WHERE docnum = @lt_transfer-docnum
+      AND cfop   IN @lr_cfop.
+  SORT lt_cfop_hit BY docnum.
+  DELETE ADJACENT DUPLICATES FROM lt_cfop_hit COMPARING docnum.
+
+  LOOP AT lt_transfer INTO DATA(ls_nfdoc).
+
+    READ TABLE lt_cfop_hit INTO DATA(ls_cfop_hit) WITH KEY docnum = ls_nfdoc-docnum BINARY SEARCH.
+    IF sy-subrc <> 0.
+      CONTINUE. " no qualifying CFOP line on this nota
+    ENDIF.
+
+    " Destination branch = last 4 characters of PARID (see the header
+    " comment on the BUKRS+BRANCH convention).
+    DATA lv_off TYPE i.
+    lv_off = strlen( ls_nfdoc-parid ) - 4.
+    DATA(lv_dest_branch) = ls_nfdoc-parid+lv_off(4).
+
+    DATA(ls_lane_key) = VALUE ty_lane_key(
+      bukrs           = ls_nfdoc-bukrs
+      vendor_code     = space
+      vendor_tax_id   = ls_nfdoc-cnpj_bupla
+      vendor_region   = space
+      country         = ls_nfdoc-land1
+      plant_code      = lv_dest_branch
+      plant_region    = ls_nfdoc-regio
+      transfer_cfop   = ls_cfop_hit-cfop
+      transfer_branch = ls_nfdoc-branch ).
+
+    DATA lv_origin TYPE t005u-bland.
+    DATA lv_dest   TYPE t005u-bland.
+    DATA lv_level  TYPE n LENGTH 1.
+    DATA lv_lane_subrc TYPE sy-subrc.
+    PERFORM match_lane USING ls_lane_key lt_lane_all
+                     CHANGING lv_origin lv_dest lv_level lv_lane_subrc.
+
+    IF lv_lane_subrc <> 0.
+      CONTINUE. " not in scope (no lane matched), or configuration error (ambiguous lanes)
+    ENDIF.
+
+    " Real plant (WERKS), needed only for the eventual FI posting
+    " (Y0033FI_ICMS_F02 - POST_RELEASED_ITEMS sets the GL line's plant
+    " from WERKS_DEST) - not needed for the lane match above, which
+    " works off branch codes directly. Looked up only for candidates
+    " that already passed the lane match, so this stays a cheap
+    " SELECT SINGLE, not a bulk concern like SELECT_CANDIDATE_DOCUMENTS.
+    " T001W has no BUKRS field at all (plant-to-company-code linkage
+    " is indirect, via T001K/T001) - J_1BBRANCH alone is the lookup key
+    " here, since Business Place codes are unique per plant regardless
+    " of company code.
+    DATA lv_werks_dest TYPE werks_d.
+    CLEAR lv_werks_dest.
+    SELECT SINGLE werks FROM t001w
+      INTO @lv_werks_dest
+      WHERE j_1bbranch = @lv_dest_branch.
+
+    " Destination (DIRECT=1) counterpart - only trusted when exactly one
+    " match exists for this NFENUM+SERIES, same cardinality reasoning as
+    " SELECT_CANDIDATE_DOCUMENTS; left blank otherwise.
+    DATA lt_dest_candidates LIKE lt_transfer_dest.
+    CLEAR lt_dest_candidates.
+    LOOP AT lt_transfer_dest INTO DATA(ls_dest_row) WHERE nfenum = ls_nfdoc-nfenum AND series = ls_nfdoc-series.
+      APPEND ls_dest_row TO lt_dest_candidates.
+    ENDLOOP.
+    DATA lv_docnum_dest TYPE j_1bnfdoc-docnum.
+    CLEAR lv_docnum_dest.
+    IF lines( lt_dest_candidates ) = 1.
+      READ TABLE lt_dest_candidates INTO DATA(ls_dest) INDEX 1.
+      lv_docnum_dest = ls_dest-docnum.
+    ENDIF.
+
+    CLEAR gwa_item.
+    gwa_item-docnum      = ls_nfdoc-docnum.
+    gwa_item-docnum_orig = ls_nfdoc-docnum.  " this FORM matches on DIRECT=2 (origin)
+    gwa_item-docnum_dest = lv_docnum_dest.
+    gwa_item-nfenum      = ls_nfdoc-nfenum.
+    gwa_item-series      = ls_nfdoc-series.
+    gwa_item-bukrs       = ls_nfdoc-bukrs.
+    gwa_item-branch      = ls_nfdoc-branch.
+    gwa_item-land1       = ls_nfdoc-land1.
+    gwa_item-docdat      = ls_nfdoc-docdat.
+    gwa_item-cancel      = ls_nfdoc-cancel.
+    gwa_item-regio_orig  = lv_origin.
+    gwa_item-regio_dest  = lv_dest.
+    gwa_item-lane_match_level = lv_level.
+    gwa_item-werks_dest  = lv_werks_dest.
+    " EDOC_GUID/MATERIALDOC(_YEAR) stay blank - no eDocument involved
+    " at this point; SYNC_EDOC_TRACKING fills EDOC_GUID in later if and
+    " when one shows up for this same NFe at the destination.
 
     APPEND gwa_item TO git_item.
 
@@ -265,13 +757,18 @@ FORM upsert_edoc_link_error USING pu_edoc_guid TYPE char32
                                    pu_inc       TYPE any
                                    pu_match_count TYPE n
                                    pu_process   TYPE char10
-                                   pu_status    TYPE char10.
+                                   pu_status    TYPE char10
+                                   pu_accesskey TYPE char44
+                                   pu_already_known TYPE abap_bool.
 
-  SELECT SINGLE @abap_true FROM y0033fi_icm_edoc INTO @DATA(lv_exists)
-    WHERE edoc_guid = @pu_edoc_guid.
-
-  IF sy-subrc = 0.
+  " PU_ALREADY_KNOWN comes from a single bulk lookup the caller
+  " (SELECT_CANDIDATE_DOCUMENTS) already did for every eDocument in
+  " this run, instead of this FORM running its own SELECT SINGLE on
+  " every call - see that FORM for why. COMMIT WORK AND WAIT also
+  " moved there (once for the whole run, not once per call here).
+  IF pu_already_known = abap_true.
     UPDATE y0033fi_icm_edoc SET match_count    = @pu_match_count,
+                                accesskey      = @pu_accesskey,
                                 status         = @gc_edoc_status-link_error,
                                 last_seen_date = @sy-datum,
                                 last_seen_time = @sy-uzeit
@@ -280,6 +777,7 @@ FORM upsert_edoc_link_error USING pu_edoc_guid TYPE char32
     INSERT y0033fi_icm_edoc FROM @( VALUE #(
       edoc_guid       = pu_edoc_guid
       match_count     = pu_match_count
+      accesskey       = pu_accesskey
       edoc_process    = pu_process
       edoc_status     = pu_status
       status          = gc_edoc_status-link_error
@@ -288,7 +786,6 @@ FORM upsert_edoc_link_error USING pu_edoc_guid TYPE char32
       last_seen_date  = sy-datum
       last_seen_time  = sy-uzeit ) ).
   ENDIF.
-  COMMIT WORK AND WAIT.
 
 ENDFORM.
 
@@ -304,14 +801,15 @@ FORM upsert_edoc_active USING pu_edoc_guid TYPE char32
                                pu_docnum    TYPE j_1bnfdoc-docnum
                                pu_inc       TYPE any
                                pu_process   TYPE char10
-                               pu_status    TYPE char10.
+                               pu_status    TYPE char10
+                               pu_accesskey TYPE char44
+                               pu_already_known TYPE abap_bool.
 
-  SELECT SINGLE @abap_true FROM y0033fi_icm_edoc INTO @DATA(lv_exists)
-    WHERE edoc_guid = @pu_edoc_guid.
-
-  IF sy-subrc = 0.
+  " Same reasoning as UPSERT_EDOC_LINK_ERROR above.
+  IF pu_already_known = abap_true.
     UPDATE y0033fi_icm_edoc SET docnum         = @pu_docnum,
                                 match_count    = 1,
+                                accesskey      = @pu_accesskey,
                                 status         = @gc_edoc_status-active,
                                 last_seen_date = @sy-datum,
                                 last_seen_time = @sy-uzeit
@@ -321,6 +819,7 @@ FORM upsert_edoc_active USING pu_edoc_guid TYPE char32
       edoc_guid       = pu_edoc_guid
       docnum          = pu_docnum
       match_count     = 1
+      accesskey       = pu_accesskey
       edoc_process    = pu_process
       edoc_status     = pu_status
       status          = gc_edoc_status-active
@@ -329,7 +828,6 @@ FORM upsert_edoc_active USING pu_edoc_guid TYPE char32
       last_seen_date  = sy-datum
       last_seen_time  = sy-uzeit ) ).
   ENDIF.
-  COMMIT WORK AND WAIT.
 
 ENDFORM.
 
@@ -486,7 +984,7 @@ FORM read_items_and_icms.
 
   LOOP AT git_item INTO gwa_item.
 
-    SELECT itmnum, matnr, matorg, menge, meins, netwr, mwskz, prctr
+    SELECT itmnum, matnr, matorg, menge, meins, netwr, mwskz, prctr, cfop
       FROM j_1bnflin
       INTO TABLE @DATA(lt_lin)
       WHERE docnum = @gwa_item-docnum.
@@ -510,6 +1008,7 @@ FORM read_items_and_icms.
       ls_out-netwr  = ls_lin-netwr.
       ls_out-mwskz  = ls_lin-mwskz.
       ls_out-prctr  = ls_lin-prctr.
+      ls_out-cfop   = ls_lin-cfop.
 
       IF lv_lines = 0.
         ls_out-status = gc_status-error.
@@ -534,7 +1033,7 @@ FORM read_items_and_icms.
         ls_out-icms_rate = ls_stx-rate.
         ls_out-icms_val  = ls_stx-taxval.
         ls_out-stx_seq   = 1.
-        ls_out-status    = 'A'.  " internal working marker - not a persisted STATUS value
+        ls_out-line_ok   = abap_true.  " pipeline-internal marker - see TY_ITEM-LINE_OK
       ENDIF.
 
       APPEND ls_out TO lt_result.
@@ -559,7 +1058,7 @@ ENDFORM.
 *---------------------------------------------------------------------*
 FORM determine_benefit_percentage.
 
-  LOOP AT git_item INTO gwa_item WHERE status = 'A'.
+  LOOP AT git_item INTO gwa_item WHERE line_ok = abap_true.
     DATA(lv_tabix) = sy-tabix.
 
     " Confirmed access table for YRB1: A607 (Country/Ship from/Ship
@@ -633,13 +1132,19 @@ FORM filter_active_cycle.
   " ones, both under the same STATUS column.
   DATA lt_remove_idx TYPE TABLE OF sy-tabix.
 
-  LOOP AT git_item INTO gwa_item WHERE status = 'A'.
+  LOOP AT git_item INTO gwa_item WHERE line_ok = abap_true.
     DATA(lv_tabix) = sy-tabix.
 
+    " REVERSED and REJECTED are both "closed" outcomes - like a
+    " reversed posting, a rejected candidate should not permanently
+    " block the same nota/item from becoming a fresh candidate again
+    " in a later search.
     SELECT SINGLE @abap_true FROM y0033fi_icm_item INTO @DATA(lv_exists)
       WHERE docnum = @gwa_item-docnum
         AND itmnum = @gwa_item-itmnum
-        AND status <> @gc_status-reversed.
+        AND status <> @gc_status-reversed
+        AND status <> @gc_status-rejected
+        AND status <> @gc_status-cancelled_pre_post.
 
     IF sy-subrc = 0.
       APPEND lv_tabix TO lt_remove_idx.
@@ -661,7 +1166,7 @@ ENDFORM.
 *---------------------------------------------------------------------*
 FORM calculate_credit.
 
-  LOOP AT git_item INTO gwa_item WHERE status = 'A'.
+  LOOP AT git_item INTO gwa_item WHERE line_ok = abap_true.
     DATA(lv_tabix) = sy-tabix.
     gwa_item-credit_amount = gwa_item-icms_base * ( gwa_item-benefit_percent / 100 ).
     gwa_item-waers  = gv_waers.
@@ -719,10 +1224,13 @@ FORM build_celltab.
   " Every column name that appears in BUILD_FIELDCAT, except SEL.
   DATA lt_fieldnames TYPE TABLE OF lvc_fname.
   APPEND: 'DOCNUM'       TO lt_fieldnames,
+          'DOCNUM_ORIG'  TO lt_fieldnames,
+          'DOCNUM_DEST'  TO lt_fieldnames,
           'NFENUM'       TO lt_fieldnames,
           'ITMNUM'       TO lt_fieldnames,
           'SEQNR'        TO lt_fieldnames,
           'MATNR'        TO lt_fieldnames,
+          'CFOP'         TO lt_fieldnames,
           'ICMS_BASE'    TO lt_fieldnames,
           'ICMS_EXCBAS'  TO lt_fieldnames,
           'ICMS_OTHBAS'  TO lt_fieldnames,
@@ -730,19 +1238,33 @@ FORM build_celltab.
           'SERIES'       TO lt_fieldnames,
           'DOCDAT'       TO lt_fieldnames,
           'ICMS_VAL'     TO lt_fieldnames,
+          'LAND1'        TO lt_fieldnames,
+          'REGIO_ORIG'   TO lt_fieldnames,
+          'REGIO_DEST'   TO lt_fieldnames,
+          'MATORG'       TO lt_fieldnames,
+          'KSCHL'        TO lt_fieldnames,
+          'KNUMH'        TO lt_fieldnames,
+          'DATAB'        TO lt_fieldnames,
+          'DATBI'        TO lt_fieldnames,
           'BENEFIT_PERCENT' TO lt_fieldnames,
           'CREDIT_AMOUNT'   TO lt_fieldnames,
           'WAERS'        TO lt_fieldnames,
-          'STATUS'       TO lt_fieldnames,
           'STATUS_ICON'  TO lt_fieldnames,
+          'STATUS_DESCR' TO lt_fieldnames,
           'EDOC_GUID'    TO lt_fieldnames,
           'BELNR_FI'     TO lt_fieldnames,
           'BUZEI_FI'     TO lt_fieldnames,
           'CRE_USER'     TO lt_fieldnames,
           'CRE_DATE'     TO lt_fieldnames,
+          'CRE_TIME'     TO lt_fieldnames,
           'APR_USER'     TO lt_fieldnames,
           'APR_DATE'     TO lt_fieldnames,
+          'APR_TIME'     TO lt_fieldnames,
+          'PST_USER'     TO lt_fieldnames,
+          'PST_DATE'     TO lt_fieldnames,
+          'PST_TIME'     TO lt_fieldnames,
           'REVERSAL_TRIGGER' TO lt_fieldnames,
+          'REVERSAL_BELNR' TO lt_fieldnames,
           'MSG'          TO lt_fieldnames.
 
   LOOP AT git_item INTO gwa_item.
@@ -761,13 +1283,72 @@ FORM build_celltab.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  BUILD_NOTA_COLOR
+*&---------------------------------------------------------------------*
+* Alternates a light background tint on the NFe Date/NFe Number/Item/
+* DocNum cells every time the nota fiscal changes going down GIT_ITEM,
+* so it's easy to spot where one nota's items end and the next one's
+* begin.
+*
+* GIT_ITEM is physically re-sorted here first (NFe Date / NFe Number /
+* Cycle / Item, all ascending, matching BUILD_SORT_TABLE) instead of relying
+* on GT_SORT alone - GT_SORT only tells the ALV control how to display
+* the data, it does NOT reorder the underlying internal table, so
+* grouping change detection below would otherwise walk GIT_ITEM in
+* whatever order it happened to be built (DB read order), not the
+* order actually shown on screen - the exact cause of colors looking
+* "wrong"/not grouped. If the user manually re-sorts the grid by
+* clicking another column header, each row keeps the color assigned
+* here (color travels with the row), so it stops looking grouped but
+* is never wrong for that row's own nota fiscal.
+*---------------------------------------------------------------------*
+FORM build_nota_color.
+
+  SORT git_item BY docdat ASCENDING nfenum ASCENDING seqnr ASCENDING itmnum ASCENDING.
+
+  DATA lv_last_nfenum TYPE j_1bnfdoc-nfenum.
+  DATA lv_first_row   TYPE abap_bool VALUE abap_true.
+  DATA lv_color_col   TYPE i.
+
+  LOOP AT git_item INTO gwa_item.
+    DATA(lv_tabix) = sy-tabix.
+
+    IF lv_first_row = abap_true OR gwa_item-nfenum <> lv_last_nfenum.
+      lv_first_row   = abap_false.
+      lv_last_nfenum = gwa_item-nfenum.
+      " Flip between "no tint" (0) and COL_POSITIVE (5, green) each
+      " time the nota fiscal changes.
+      IF lv_color_col = 5.
+        lv_color_col = 0.
+      ELSE.
+        lv_color_col = 5.
+      ENDIF.
+    ENDIF.
+
+    CLEAR gwa_item-color_tab.
+    IF lv_color_col <> 0.
+      APPEND VALUE #( fname = 'DOCDAT' color-col = lv_color_col color-int = 0 color-inv = 0 )
+        TO gwa_item-color_tab.
+      APPEND VALUE #( fname = 'NFENUM' color-col = lv_color_col color-int = 0 color-inv = 0 )
+        TO gwa_item-color_tab.
+      APPEND VALUE #( fname = 'ITMNUM' color-col = lv_color_col color-int = 0 color-inv = 0 )
+        TO gwa_item-color_tab.
+      APPEND VALUE #( fname = 'DOCNUM' color-col = lv_color_col color-int = 0 color-inv = 0 )
+        TO gwa_item-color_tab.
+    ENDIF.
+    MODIFY git_item FROM gwa_item INDEX lv_tabix TRANSPORTING color_tab.
+  ENDLOOP.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  BUILD_STATUS_ICONS
 *&---------------------------------------------------------------------*
 * Maps each item's STATUS to a traffic-light icon shown in its own
-* ALV column (STATUS_ICON, see BUILD_FIELDCAT) - the STATUS text
-* column stays as-is, this is just a quick visual cue alongside it.
-* Icon names confirmed against this system's icon list (transaction
-* ICON) before use.
+* ALV column (STATUS_ICON, see BUILD_FIELDCAT) - STATUS_DESCR (see
+* BUILD_STATUS_DESCR) stays as-is, this is just a quick visual cue
+* alongside it. Icon names confirmed against this system's icon list
+* (transaction ICON) before use.
 *---------------------------------------------------------------------*
 FORM build_status_icons.
 
@@ -776,11 +1357,17 @@ FORM build_status_icons.
 
     CASE gwa_item-status.
       WHEN gc_status-ready_to_save.
-        gwa_item-status_icon = icon_led_inactive.       " not saved yet
+        gwa_item-status_icon = icon_system_play.        " not saved yet (blue - distinct from NOT_CANDIDATE below)
       WHEN gc_status-candidate.
         gwa_item-status_icon = icon_led_yellow.          " waiting for user approval
+      WHEN gc_status-rejected.
+        gwa_item-status_icon = icon_led_inactive.        " closed out, no action possible - user chose not to proceed
       WHEN gc_status-approved OR gc_status-auto_approved.
-        gwa_item-status_icon = icon_incomplete.          " waiting for admin to post
+        gwa_item-status_icon = icon_checked.              " waiting for admin to post
+      WHEN gc_status-post_failed.
+        gwa_item-status_icon = icon_message_warning.     " attempted, failed - see MSG; retry candidate, same as APPROVED
+      WHEN gc_status-cancelled_pre_post.
+        gwa_item-status_icon = icon_cancel.              " source nota cancelled before this item ever posted - terminal, no accounting document exists
       WHEN gc_status-posting.
         gwa_item-status_icon = icon_locked.              " transient posting lock
       WHEN gc_status-posted.
@@ -805,41 +1392,53 @@ FORM build_status_icons.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
-*&      Form  BUILD_COLOR_TAB
+*&      Form  BUILD_STATUS_DESCR
 *&---------------------------------------------------------------------*
-* Colors the FONT (not the cell background) of BENEFIT_PERCENT and
-* CREDIT_AMOUNT red, for every row - via a per-cell color table
-* (CTAB_FNAME), not EMPHASIZE on the field catalog. EMPHASIZE kept
-* coloring the whole cell background even with the "inverse" flag set
-* (which should mean font-only), so this uses the more granular,
-* purpose-built LVC mechanism instead. COL = 6 (red); INT/INV left at
-* their defaults (0), which is font-only coloring for this API - if
-* it still shows as a filled cell, the SAP GUI theme itself may be
-* overriding this and would need a different investigation.
+* Builds "<code> - <description>" (e.g. "010 - Candidate") for the
+* STATUS_DESCR column, shown right next to STATUS_ICON in the grid -
+* lets the user learn the numeric codes over time instead of only
+* seeing the bare number.
 *---------------------------------------------------------------------*
-FORM build_color_tab.
-
-  DATA ls_scol TYPE lvc_s_scol.
-  DATA lt_scol TYPE lvc_t_scol.
+FORM build_status_descr.
 
   LOOP AT git_item INTO gwa_item.
     DATA(lv_tabix) = sy-tabix.
-    CLEAR lt_scol.
-
-    CLEAR ls_scol.
-    ls_scol-fname     = 'BENEFIT_PERCENT'.
-    ls_scol-color-col = 6. " red
-    APPEND ls_scol TO lt_scol.
-
-    CLEAR ls_scol.
-    ls_scol-fname     = 'CREDIT_AMOUNT'.
-    ls_scol-color-col = 6. " red
-    APPEND ls_scol TO lt_scol.
-
-    gwa_item-color_tab = lt_scol.
-    MODIFY git_item FROM gwa_item INDEX lv_tabix TRANSPORTING color_tab.
+    PERFORM status_code_to_descr USING gwa_item-status CHANGING gwa_item-status_descr.
+    MODIFY git_item FROM gwa_item INDEX lv_tabix TRANSPORTING status_descr.
   ENDLOOP.
 
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  STATUS_CODE_TO_DESCR
+*&---------------------------------------------------------------------*
+* "<code> - <description>" for one status value (e.g. "010 -
+* Candidate") - single source of truth for BUILD_STATUS_DESCR and
+* SHOW_LOG_POPUP, so the two can't drift. Blank in, blank out (a
+* blank STATUS_FROM/STATUS_TO in the log is legitimate, not an error
+* - see WRITE_LOG).
+*---------------------------------------------------------------------*
+FORM status_code_to_descr USING    pu_status TYPE y0033fi_icm_status_n
+                           CHANGING pc_descr  TYPE char40.
+  CLEAR pc_descr.
+  CHECK pu_status IS NOT INITIAL.
+  CASE pu_status.
+    WHEN gc_status-candidate.          pc_descr = |{ pu_status } - Candidate|.
+    WHEN gc_status-rejected.           pc_descr = |{ pu_status } - Rejected|.
+    WHEN gc_status-approved.           pc_descr = |{ pu_status } - Approved|.
+    WHEN gc_status-auto_approved.      pc_descr = |{ pu_status } - Auto Approved|.
+    WHEN gc_status-post_failed.        pc_descr = |{ pu_status } - Post Failed|.
+    WHEN gc_status-cancelled_pre_post. pc_descr = |{ pu_status } - Cancelled Before Posting|.
+    WHEN gc_status-posting.            pc_descr = |{ pu_status } - Posting|.
+    WHEN gc_status-posted.             pc_descr = |{ pu_status } - Posted|.
+    WHEN gc_status-cancel_detected.    pc_descr = |{ pu_status } - Cancel Detected|.
+    WHEN gc_status-reversal_requested. pc_descr = |{ pu_status } - Reversal Requested|.
+    WHEN gc_status-reversed.           pc_descr = |{ pu_status } - Reversed|.
+    WHEN gc_status-ready_to_save.      pc_descr = |{ pu_status } - Ready to Save|.
+    WHEN gc_status-not_candidate.      pc_descr = |{ pu_status } - Not a Candidate|.
+    WHEN gc_status-error.              pc_descr = |{ pu_status } - Error|.
+    WHEN OTHERS.                       CLEAR pc_descr.
+  ENDCASE.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -854,6 +1453,63 @@ FORM set_all_sel USING pu_value TYPE abap_bool.
     DATA(lv_tabix) = sy-tabix.
     gwa_item-sel = pu_value.
     MODIFY git_item FROM gwa_item INDEX lv_tabix TRANSPORTING sel.
+  ENDLOOP.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  ENSURE_FULL_DOCNUM_SELECTION
+*&---------------------------------------------------------------------*
+* In practice, an action should apply to every item of a nota fiscal
+* (DOCNUM), not just some of them. If the user ticked only part of a
+* DOCNUM's rows, ask once (covering every affected DOCNUM in a single
+* question) whether to select every item of those documents, and do
+* so on "Yes". Answering "No" leaves the selection exactly as the
+* user made it - this is a convenience prompt, not a hard block, so
+* the underlying action (SAVE/APPROVE/DEL_CAND/REQ_REV) still runs
+* against whatever GIT_ITEM-SEL ends up being.
+*---------------------------------------------------------------------*
+FORM ensure_full_docnum_selection.
+
+  DATA lt_docnum TYPE STANDARD TABLE OF j_1bdocnum WITH DEFAULT KEY.
+  LOOP AT git_item INTO DATA(ls_sel) WHERE sel = abap_true.
+    READ TABLE lt_docnum WITH KEY table_line = ls_sel-docnum TRANSPORTING NO FIELDS.
+    IF sy-subrc <> 0.
+      APPEND ls_sel-docnum TO lt_docnum.
+    ENDIF.
+  ENDLOOP.
+  CHECK lt_docnum IS NOT INITIAL.
+
+  " Keep only the DOCNUMs that have at least one UNselected row too -
+  " a DOCNUM already fully selected needs no prompt.
+  DATA lt_incomplete TYPE STANDARD TABLE OF j_1bdocnum WITH DEFAULT KEY.
+  LOOP AT lt_docnum INTO DATA(lv_docnum).
+    READ TABLE git_item TRANSPORTING NO FIELDS
+      WITH KEY docnum = lv_docnum sel = abap_false.
+    IF sy-subrc = 0.
+      APPEND lv_docnum TO lt_incomplete.
+    ENDIF.
+  ENDLOOP.
+  CHECK lt_incomplete IS NOT INITIAL.
+
+  DATA lv_answer TYPE char1.
+  CALL FUNCTION 'POPUP_TO_CONFIRM'
+    EXPORTING
+      titlebar       = 'Partial nota fiscal selection'
+      text_question  = |{ lines( lt_incomplete ) } nota fiscal(s) have some items not selected. Select all items of these documents?|
+      text_button_1  = 'Yes'
+      text_button_2  = 'No'
+      default_button = '1'
+    IMPORTING
+      answer         = lv_answer.
+
+  CHECK lv_answer = '1'.
+
+  LOOP AT git_item ASSIGNING FIELD-SYMBOL(<ls_item>).
+    READ TABLE lt_incomplete WITH KEY table_line = <ls_item>-docnum TRANSPORTING NO FIELDS.
+    IF sy-subrc = 0.
+      <ls_item>-sel = abap_true.
+    ENDIF.
   ENDLOOP.
 
 ENDFORM.
@@ -923,8 +1579,8 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 FORM write_log USING pu_item        TYPE any
                       pu_action     TYPE char20
-                      pu_status_from TYPE char20
-                      pu_status_to   TYPE char20
+                      pu_status_from TYPE y0033fi_icm_status_n
+                      pu_status_to   TYPE y0033fi_icm_status_n
                       pu_message     TYPE c.
 
 * PU_ITEM accepts either TY_ITEM (used throughout Y0033FI_ICMS_F01) or
@@ -1024,11 +1680,19 @@ FORM save_candidates USING pu_id_exec TYPE char20.
     " session saving the same item between search and this click
     " (FILTER_ACTIVE_CYCLE already removes items with an active cycle
     " from the search results, but that check ran moments earlier).
+    " REVERSED and REJECTED are both "closed" outcomes - same reasoning
+    " as FILTER_ACTIVE_CYCLE, which already let this item back into the
+    " search results; this second check (done right before INSERT, to
+    " catch a race since FILTER_ACTIVE_CYCLE ran moments earlier) must
+    " agree with it, or a REJECTED item would pass the first check but
+    " still get silently skipped here.
     SELECT COUNT(*) FROM y0033fi_icm_item
       INTO @DATA(lv_active_count)
       WHERE docnum = @ls_sel-docnum
         AND itmnum = @ls_sel-itmnum
-        AND status <> @gc_status-reversed.
+        AND status <> @gc_status-reversed
+        AND status <> @gc_status-rejected
+        AND status <> @gc_status-cancelled_pre_post.
     IF lv_active_count > 0.
       lv_skip = lv_skip + 1.
       PERFORM dequeue_item USING ls_sel-docnum ls_sel-itmnum 0.
@@ -1046,7 +1710,7 @@ FORM save_candidates USING pu_id_exec TYPE char20.
 
     INSERT y0033fi_icm_item FROM @( CORRESPONDING y0033fi_icm_item( ls_sel ) ).
     IF sy-subrc = 0.
-      PERFORM write_log USING ls_sel gc_action-candidate_saved space gc_status-candidate
+      PERFORM write_log USING ls_sel gc_action-candidate_saved '000' gc_status-candidate
                                'Candidate saved by user'.
       " link this SEQNR to the eDoc tracking row, if we have a GUID
       IF ls_sel-edoc_guid IS NOT INITIAL.
@@ -1099,10 +1763,16 @@ FORM delete_candidates.
       CONTINUE.
     ENDIF.
 
+    " STATUS = CANDIDATE in the WHERE guards against a stale grid: if
+    " another session already moved this item on (e.g. approved it)
+    " since this screen last refreshed, SY-SUBRC comes back <> 0 below
+    " and nothing is deleted/logged, instead of blindly deleting
+    " whatever the key still points to.
     DELETE FROM y0033fi_icm_item
-      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr.
+      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr
+        AND status = @gc_status-candidate.
     IF sy-subrc = 0.
-      PERFORM write_log USING ls_sel gc_action-candidate_deleted gc_status-candidate space
+      PERFORM write_log USING ls_sel gc_action-candidate_deleted gc_status-candidate '000'
                                'Candidate deleted by user'.
       IF ls_sel-edoc_guid IS NOT INITIAL.
         UPDATE y0033fi_icm_edoc SET seqnr = 0
@@ -1116,6 +1786,61 @@ FORM delete_candidates.
 
   COMMIT WORK AND WAIT.
   MESSAGE s014(y0033icms) WITH lv_deleted.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  REJECT_CANDIDATES
+*&---------------------------------------------------------------------*
+* Lets the user reject a candidate they no longer want to proceed
+* with, as long as it's still STATUS = CANDIDATE (not yet approved).
+* Unlike DELETE_CANDIDATES, the row stays in Y0033FI_ICM_ITEM (STATUS
+* = REJECTED) instead of being removed, so it's still visible in
+* "View My Candidates" for audit, not only in Y0033FI_ICM_LOG. Same as
+* a deleted candidate, a rejected one does not permanently block the
+* same nota/item from becoming a fresh candidate again in a future
+* search (see FILTER_ACTIVE_CYCLE).
+*---------------------------------------------------------------------*
+FORM reject_candidates.
+
+  DATA lt_selected TYPE ty_it_item.
+  LOOP AT git_item INTO DATA(ls_cand) WHERE sel = 'X' AND status = gc_status-candidate.
+    APPEND ls_cand TO lt_selected.
+  ENDLOOP.
+  IF lt_selected IS INITIAL.
+    MESSAGE e020(y0033icms).
+    RETURN.
+  ENDIF.
+
+  DATA lv_rejected TYPE i.
+
+  LOOP AT lt_selected INTO DATA(ls_sel).
+    DATA lv_subrc TYPE sy-subrc.
+    PERFORM enqueue_item USING ls_sel-docnum ls_sel-itmnum ls_sel-seqnr CHANGING lv_subrc.
+    IF lv_subrc <> 0.
+      CONTINUE.
+    ENDIF.
+
+    " STATUS = CANDIDATE in the WHERE guards against a stale grid -
+    " same reasoning as DELETE_CANDIDATES/APPROVE_CANDIDATES.
+    UPDATE y0033fi_icm_item SET status = @gc_status-rejected
+      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr
+        AND status = @gc_status-candidate.
+    IF sy-subrc = 0.
+      PERFORM write_log USING ls_sel gc_action-candidate_rejected gc_status-candidate gc_status-rejected
+                               'Rejected by user'.
+      IF ls_sel-edoc_guid IS NOT INITIAL.
+        UPDATE y0033fi_icm_edoc SET seqnr = 0
+          WHERE docnum = ls_sel-docnum AND edoc_guid = ls_sel-edoc_guid.
+      ENDIF.
+      lv_rejected = lv_rejected + 1.
+    ENDIF.
+
+    PERFORM dequeue_item USING ls_sel-docnum ls_sel-itmnum ls_sel-seqnr.
+  ENDLOOP.
+
+  COMMIT WORK AND WAIT.
+  MESSAGE s021(y0033icms) WITH lv_rejected.
 
 ENDFORM.
 
@@ -1152,11 +1877,65 @@ FORM show_log_popup.
     RETURN.
   ENDIF.
 
+* Display-only projection of Y0033FI_ICM_LOG: adds the "<code> -
+* <description>" text for STATUS_FROM/STATUS_TO (see
+* STATUS_CODE_TO_DESCR) and picks/orders exactly the columns wanted,
+* instead of showing every raw field of the log table. GT_LOG_DISP
+* (TY_LOG_DISP, Y0033FI_ICMS_TOP) is global, not a local table here -
+* see CLASS LCL_LOG_EVENTS for why (it needs to read the row back by
+* index when BELNR is clicked).
+  CLEAR gt_log_disp.
+
+  LOOP AT lt_log INTO DATA(ls_log).
+    DATA(ls_disp) = VALUE ty_log_disp(
+      seqnr    = ls_log-seqnr
+      itmnum   = ls_log-itmnum
+      action   = ls_log-action
+      lognr    = ls_log-lognr
+      bukrs    = ls_log-bukrs
+      belnr    = ls_log-belnr
+      gjahr    = ls_log-gjahr
+      message  = ls_log-message
+      act_user = ls_log-act_user
+      act_date = ls_log-act_date
+      act_time = ls_log-act_time ).
+    PERFORM status_code_to_descr USING ls_log-status_from CHANGING ls_disp-status_from.
+    PERFORM status_code_to_descr USING ls_log-status_to   CHANGING ls_disp-status_to.
+    APPEND ls_disp TO gt_log_disp.
+  ENDLOOP.
+
   TRY.
       cl_salv_table=>factory(
         IMPORTING r_salv_table = DATA(lo_salv)
-        CHANGING  t_table      = lt_log ).
+        CHANGING  t_table      = gt_log_disp ).
+
       lo_salv->get_columns( )->set_optimize( abap_true ).
+      lo_salv->get_display_settings( )->set_striped_pattern( abap_true ).
+
+      DATA(lo_columns) = lo_salv->get_columns( ).
+      lo_columns->get_column( 'SEQNR' )->set_medium_text( 'Cycle' ).
+      lo_columns->get_column( 'ITMNUM' )->set_medium_text( 'Item No' ).
+      lo_columns->get_column( 'ACTION' )->set_medium_text( 'Action' ).
+      lo_columns->get_column( 'LOGNR' )->set_medium_text( 'Log' ).
+      lo_columns->get_column( 'STATUS_FROM' )->set_medium_text( 'Status From' ).
+      lo_columns->get_column( 'STATUS_TO' )->set_medium_text( 'Status To' ).
+      lo_columns->get_column( 'BUKRS' )->set_technical( abap_true ).  " only needed for the FB03 call, see LCL_LOG_EVENTS
+      " BELNR is clickable (hotspot) - opens FB03. See LCL_LOG_EVENTS.
+      " SET_CELL_TYPE only exists on CL_SALV_COLUMN_TABLE, not on the
+      " GET_COLUMN return type CL_SALV_COLUMN - an explicit downcast is
+      " required, confirmed via a real activation error ("SET_CELL_TYPE
+      " is unknown") without it.
+      DATA(lo_col_belnr) = CAST cl_salv_column_table( lo_columns->get_column( 'BELNR' ) ).
+      lo_col_belnr->set_medium_text( 'Acc. Document' ).
+      lo_col_belnr->set_cell_type( if_salv_c_cell_type=>hotspot ).
+      lo_columns->get_column( 'GJAHR' )->set_medium_text( 'Year' ).
+      lo_columns->get_column( 'MESSAGE' )->set_medium_text( 'Log Message' ).
+      lo_columns->get_column( 'ACT_USER' )->set_medium_text( 'User Name' ).
+      lo_columns->get_column( 'ACT_DATE' )->set_medium_text( 'Date' ).
+      lo_columns->get_column( 'ACT_TIME' )->set_medium_text( 'Time' ).
+
+      SET HANDLER lcl_log_events=>on_link_click FOR lo_salv->get_event( ).
+
       lo_salv->set_screen_popup( start_column = 5
                                   end_column   = 150
                                   start_line   = 3
@@ -1190,11 +1969,17 @@ FORM approve_candidates.
       CONTINUE.
     ENDIF.
 
+    " STATUS = CANDIDATE in the WHERE guards against a stale grid: if
+    " another session already approved (or otherwise moved) this item
+    " since this screen last refreshed, SY-SUBRC comes back <> 0 below
+    " and APR_USER/APR_DATE/the log are left untouched, instead of
+    " silently overwriting who/when it was really approved.
     UPDATE y0033fi_icm_item SET status   = @gc_status-approved,
                                 apr_user = @sy-uname,
                                 apr_date = @sy-datum,
                                 apr_time = @sy-uzeit
-      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr.
+      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr
+        AND status = @gc_status-candidate.
 
     IF sy-subrc = 0.
       PERFORM write_log USING ls_sel gc_action-approved gc_status-candidate gc_status-approved
@@ -1241,12 +2026,22 @@ FORM request_reversal.
                                      THEN gc_trigger-nf_canceled
                                      ELSE gc_trigger-manual ).
 
+    " STATUS = LS_SEL-STATUS (the exact source status this screen last
+    " saw - POSTED or CANCEL_DETECTED) guards against a stale grid: if
+    " another session already moved this item on since then, SY-SUBRC
+    " comes back <> 0 below and nothing is changed/logged. Matching the
+    " exact remembered status (not just "still one of the two valid
+    " ones") also protects LV_TRIGGER above, which was picked from that
+    " same snapshot - if the real status flipped between POSTED and
+    " CANCEL_DETECTED in the meantime, a future refresh will record the
+    " correct trigger instead of a stale/wrong one.
     UPDATE y0033fi_icm_item SET status        = @gc_status-reversal_requested,
                                 reversal_trigger  = @lv_trigger,
                                 reversal_req_user = @sy-uname,
                                 reversal_req_date = @sy-datum,
                                 reversal_req_time = @sy-uzeit
-      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr.
+      WHERE docnum = @ls_sel-docnum AND itmnum = @ls_sel-itmnum AND seqnr = @ls_sel-seqnr
+        AND status = @ls_sel-status.
 
     IF sy-subrc = 0.
       DATA lv_msg_rev TYPE char200.
@@ -1277,6 +2072,24 @@ FORM check_nf_cancellation.
     FROM y0033fi_icm_item
     INTO TABLE @DATA(lt_posted)
     WHERE status = @gc_status-posted.
+
+  " Online (screen 200 "Check Cancellations" button): only check what
+  " the admin actually marked with SEL - same reasoning as
+  " POST_RELEASED_ITEMS/EXECUTE_REVERSAL (Y0033FI_ICMS_F02). The
+  " background job has no GIT_ITEM/screen at all and must keep
+  " checking every POSTED item regardless, so this only applies
+  " interactively.
+  IF sy-batch = abap_false.
+    LOOP AT lt_posted INTO DATA(ls_check).
+      READ TABLE git_item WITH KEY docnum = ls_check-docnum
+                                    itmnum = ls_check-itmnum
+                                    seqnr  = ls_check-seqnr
+        INTO DATA(ls_git_check).
+      IF sy-subrc <> 0 OR ls_git_check-sel <> abap_true.
+        DELETE lt_posted.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
 
   DATA lv_flagged TYPE i.
 
@@ -1333,12 +2146,87 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
 
   DATA lt_db TYPE STANDARD TABLE OF y0033fi_icm_item WITH DEFAULT KEY.
 
+  DATA(lt_nfenum) = s_nfenum[].
+  PERFORM pad_nfenum_range CHANGING lt_nfenum.
+
+  " ACCESSKEY no longer lives on Y0033FI_ICM_ITEM (moved to
+  " Y0033FI_ICM_EDOC, its natural 1:1 owner) - resolve S_ACCKEY into a
+  " GUID range first, then filter ITEM by EDOC_GUID. An empty range
+  " table imposes no restriction, matching the "no filter entered" case;
+  " a non-empty S_ACCKEY that matches zero eDocuments must return zero
+  " items too, so that case is handled explicitly below instead of
+  " falling through to "no restriction".
+  TYPES ty_r_guid TYPE RANGE OF char32.
+  DATA lr_guid_acckey TYPE ty_r_guid.
+  IF s_acckey[] IS NOT INITIAL.
+    SELECT edoc_guid FROM y0033fi_icm_edoc
+      INTO TABLE @DATA(lt_guid_acckey)
+      WHERE accesskey IN @s_acckey.
+    IF lt_guid_acckey IS INITIAL.
+      CLEAR git_item.
+      RETURN.
+    ENDIF.
+    lr_guid_acckey = VALUE #( FOR ls_guid IN lt_guid_acckey
+                               ( sign = 'I' option = 'EQ' low = ls_guid ) ).
+  ENDIF.
+
+  " Action Date filter (S_ACTDAT + P_ASAV/P_AAPR/P_AREJ/P_APST) - lets
+  " the user find items by when a lifecycle transition actually
+  " happened, from Y0033FI_ICM_LOG, instead of relying on ITEM-level
+  " date fields that either don't exist (REJECTED) or aren't reliable
+  " for this purpose (BUDAT_FI can be backdated, or forced to today by
+  " the period-closed retry in POST_RELEASED_ITEMS). Same "resolve to a
+  " key list first" pattern as S_ACCKEY above: an empty S_ACTDAT range
+  " imposes no restriction; a non-empty one that matches zero LOG rows
+  " (or has every checkbox unchecked) must return zero items.
+  TYPES: BEGIN OF ty_log_key,
+           docnum TYPE y0033fi_icm_log-docnum,
+           itmnum TYPE y0033fi_icm_log-itmnum,
+           seqnr  TYPE y0033fi_icm_log-seqnr,
+         END OF ty_log_key.
+  DATA lt_log_keys TYPE STANDARD TABLE OF ty_log_key WITH DEFAULT KEY.
+  DATA lv_actdat_filter TYPE abap_bool VALUE abap_false.
+  IF s_actdat[] IS NOT INITIAL.
+    lv_actdat_filter = abap_true.
+    DATA lr_action TYPE RANGE OF y0033fi_icm_log-action.
+    IF p_asav = abap_true.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_action-candidate_saved ) TO lr_action.
+    ENDIF.
+    IF p_aapr = abap_true.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_action-approved ) TO lr_action.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_action-auto_approved ) TO lr_action.
+    ENDIF.
+    IF p_arej = abap_true.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_action-candidate_rejected ) TO lr_action.
+    ENDIF.
+    IF p_apst = abap_true.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = gc_action-posted ) TO lr_action.
+    ENDIF.
+    IF lr_action IS INITIAL.
+      CLEAR git_item.
+      RETURN.
+    ENDIF.
+    SELECT docnum, itmnum, seqnr FROM y0033fi_icm_log
+      INTO TABLE @lt_log_keys
+      WHERE act_date IN @s_actdat
+        AND action   IN @lr_action.
+    IF lt_log_keys IS INITIAL.
+      CLEAR git_item.
+      RETURN.
+    ENDIF.
+    SORT lt_log_keys BY docnum itmnum seqnr.
+    DELETE ADJACENT DUPLICATES FROM lt_log_keys COMPARING docnum itmnum seqnr.
+  ENDIF.
+
   SELECT * FROM y0033fi_icm_item
     INTO TABLE @lt_db
-    WHERE bukrs    = @pu_bukrs
-      AND docdat   IN @s_datum
-      AND nfenum   IN @s_nfenum
-      AND budat_fi IN @s_lcto.
+    WHERE bukrs      = @pu_bukrs
+      AND docdat     IN @s_datum
+      AND nfenum     IN @lt_nfenum
+      AND docnum     IN @s_docnum
+      AND series     IN @s_series
+      AND edoc_guid  IN @lr_guid_acckey
+      AND budat_fi   IN @s_lcto.
 
   CLEAR git_item.
   LOOP AT lt_db INTO DATA(ls_db).
@@ -1351,6 +2239,27 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
   " (e.g. NFENUM) that "INTO CORRESPONDING FIELDS OF TABLE" rejected at
   " compile time.
 
+  IF lv_actdat_filter = abap_true.
+    LOOP AT git_item INTO gwa_item.
+      READ TABLE lt_log_keys TRANSPORTING NO FIELDS BINARY SEARCH
+        WITH KEY docnum = gwa_item-docnum
+                 itmnum = gwa_item-itmnum
+                 seqnr  = gwa_item-seqnr.
+      IF sy-subrc <> 0.
+        DELETE git_item.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+* NICE TO HAVE: for transfer-flow items (SELECT_TRANSFER_CANDIDATES),
+* EDOC_GUID is saved blank (that flow has no eDocument dependency) and
+* only ever resolved here, in memory, for display - if the inbound
+* eDocument for the same DOCNUM only shows up later (plausible, given
+* the two flows run independently), the persisted Y0033FI_ICM_ITEM
+* row never gets backfilled, only what's shown on screen. Low
+* priority: EDOC_GUID was never this flow's identity/traceability key
+* (DOCNUM+ITMNUM+SEQNR is), so this only matters if something outside
+* this program's own screens reads EDOC_GUID directly off the table.
   LOOP AT git_item INTO gwa_item.
     DATA(lv_tabix) = sy-tabix.
     DATA lv_latest_guid TYPE char32.
@@ -1364,26 +2273,16 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
-*&      Form  APPLY_SCREEN_FILTER
+*&      Form  APPLY_STATUS_FILTER
 *&---------------------------------------------------------------------*
-FORM apply_screen_filter USING pu_filter TYPE char1.
+* Keeps only the rows whose STATUS is checked on the filter
+* checkboxes (PU_RANGE, built by GET_STATUS_FILTER_SEARCH/_VIEW).
+* Unchecking every box is not a no-op - it means "show nothing", same
+* as an empty range matching nothing.
+*---------------------------------------------------------------------*
+FORM apply_status_filter USING pu_range TYPE ty_r_status.
 
-  CASE pu_filter.
-    WHEN gc_filter-attention.
-      DELETE git_item WHERE status <> gc_status-cancel_detected
-                         AND status <> gc_status-reversal_requested
-                         AND status <> gc_status-error.
-    WHEN gc_filter-new_cand.
-      DELETE git_item WHERE status <> gc_status-candidate.
-    WHEN gc_filter-processed.
-      DELETE git_item WHERE status <> gc_status-approved
-                         AND status <> gc_status-auto_approved
-                         AND status <> gc_status-posted
-                         AND status <> gc_status-reversed.
-    WHEN gc_filter-clean.
-      DELETE git_item WHERE status = gc_status-error.
-    WHEN OTHERS. " gc_filter-all: no filtering
-  ENDCASE.
+  DELETE git_item WHERE status NOT IN pu_range.
 
 ENDFORM.
 
@@ -1428,6 +2327,18 @@ FORM build_fieldcat USING pu_mode TYPE c.
   ls_fcat-icon      = abap_true.
   APPEND ls_fcat TO gt_fcat.
 
+  " STATUS_DESCR - "<code> - <description>", right next to the icon
+  " (see BUILD_STATUS_DESCR) so the user learns the numeric codes.
+  add_field 'STATUS_DESCR' 'Status'            28.
+
+  " Display order: NFe Date, NFe Number, Cycle, Item (also the sort/
+  " grouping key - see BUILD_SORT_TABLE/BUILD_NOTA_COLOR), then
+  " DocNum, Series.
+  add_field 'DOCDAT'      'NFe Date'           10.
+  add_field 'NFENUM'      'NFe Number'         12.
+  add_field 'SEQNR'       'Cycle'               6.
+  add_field 'ITMNUM'      'Item'                6.
+
   " DOCNUM is clickable (hotspot) - opens J1BNFE. See LCL_ALV_EVENTS.
   CLEAR ls_fcat.
   ls_fcat-fieldname = 'DOCNUM'.
@@ -1435,11 +2346,16 @@ FORM build_fieldcat USING pu_mode TYPE c.
   ls_fcat-outputlen = 12.
   ls_fcat-hotspot   = abap_true.
   APPEND ls_fcat TO gt_fcat.
-  add_field 'NFENUM'      'NFe Number'         12.
   add_field 'SERIES'      'Series'              4.
-  add_field 'DOCDAT'      'Nota Date'          10.
-  add_field 'ITMNUM'      'Item'                6.
-  add_field 'SEQNR'       'Cycle'               6.
+
+  " DOCNUM_ORIG/DOCNUM_DEST - origin/destination DOCNUM for this same
+  " NFENUM+SERIES+BUKRS, resolved by whichever search model found the
+  " candidate (see SELECT_CANDIDATE_DOCUMENTS/SELECT_TRANSFER_CANDIDATES).
+  " Display only for now - NOT YET PERSISTED (Y0033FI_ICM_ITEM has no
+  " matching DDIC fields yet), so these go blank again after a reload
+  " from the DB (View/Admin modes) until that DDIC change is made.
+  add_field 'DOCNUM_ORIG' 'DocNum Orig.'       12.
+  add_field 'DOCNUM_DEST' 'DocNum Dest.'       12.
 
   " MATNR gets its own entry (not the plain macro) so the ALV applies
   " the material number conversion exit (leading zero handling, etc.)
@@ -1452,17 +2368,14 @@ FORM build_fieldcat USING pu_mode TYPE c.
   ls_fcat-ref_field  = 'MATNR'.
   APPEND ls_fcat TO gt_fcat.
 
+  add_field 'CFOP'        'CFOP'                8.
+
   add_field 'ICMS_BASE'   'ICMS Base'          16.
   add_field 'ICMS_EXCBAS' 'Excluded Base'      16.
   add_field 'ICMS_OTHBAS' 'Other Base'         16.
   add_field 'ICMS_RATE'   'ICMS Rate'          10.
   add_field 'ICMS_VAL'    'ICMS on NF'         18.
 
-  " Benefit % and ICMS Credit - font color set via COLOR_TAB
-  " (CTAB_FNAME, see BUILD_COLOR_TAB), NOT via EMPHASIZE here - the
-  " EMPHASIZE approach kept coloring the cell background regardless of
-  " the inverse flag, which is not what we want (background stays the
-  " normal zebra-striped row; only the text is red).
   CLEAR ls_fcat.
   ls_fcat-fieldname = 'BENEFIT_PERCENT'.
   ls_fcat-coltext   = 'Benefit %'.
@@ -1476,16 +2389,28 @@ FORM build_fieldcat USING pu_mode TYPE c.
   APPEND ls_fcat TO gt_fcat.
 
   add_field 'WAERS'       'Cur.'                5.
-  add_field 'STATUS'      'Status'             20.
 
   " EDOC_GUID is clickable (hotspot) - see LCL_ALV_EVENTS in the TOP
   " include, registered on the grid in each screen's PBO.
   CLEAR ls_fcat.
   ls_fcat-fieldname = 'EDOC_GUID'.
-  ls_fcat-coltext   = 'Latest eDocument'.
+  ls_fcat-coltext   = 'eDocument'.
   ls_fcat-outputlen = 20.
   ls_fcat-hotspot   = abap_true.
   APPEND ls_fcat TO gt_fcat.
+
+  " A607 access-key fields (see DETERMINE_BENEFIT_PERCENTAGE) - shown
+  " for traceability, so it's visible exactly which combination
+  " (country/origin/destination/material origin) produced the matched
+  " condition record and its validity window.
+  add_field 'LAND1'      'Country'             4.
+  add_field 'REGIO_ORIG' 'Ship-from UF'       12.
+  add_field 'REGIO_DEST' 'Ship-to UF'         12.
+  add_field 'MATORG'     'Mat. Origin'        10.
+  add_field 'KSCHL'      'Cond. Type'         10.
+  add_field 'KNUMH'      'Condition Rec.'     14.
+  add_field 'DATAB'      'Valid From'         10.
+  add_field 'DATBI'      'Valid To'           10.
 
   " Same columns for both screens now (admin and user cockpit share
   " this catalog regardless of PU_MODE) - all of these come from the
@@ -1500,9 +2425,26 @@ FORM build_fieldcat USING pu_mode TYPE c.
   add_field 'BUZEI_FI'    'Item'              6.
   add_field 'CRE_USER'    'Created by'       12.
   add_field 'CRE_DATE'    'Created on'       10.
+  add_field 'CRE_TIME'    'Created at'       10.
   add_field 'APR_USER'    'Approved by'      12.
   add_field 'APR_DATE'    'Approved on'      10.
+  add_field 'APR_TIME'    'Approved at'      10.
+  add_field 'PST_USER'    'Posted by'        12.
+  add_field 'PST_DATE'    'Posted on'        10.
+  add_field 'PST_TIME'    'Posted at'        10.
   add_field 'REVERSAL_TRIGGER' 'Rev. trigger'    20.
+
+  " REVERSAL_BELNR - the reversal accounting document (distinct from
+  " BELNR_FI, the original posted document) - clickable the same way,
+  " see WHEN 'REVERSAL_BELNR' in LCL_ALV_EVENTS (Y0033FI_ICMS_TOP).
+  " Blank until EXECUTE_REVERSAL (Y0033FI_ICMS_F02) actually reverses
+  " the item.
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'REVERSAL_BELNR'.
+  ls_fcat-coltext   = 'Reversal Doc.'.
+  ls_fcat-outputlen = 12.
+  ls_fcat-hotspot   = abap_true.
+  APPEND ls_fcat TO gt_fcat.
 
   add_field 'MSG' 'Message / Pending' 60.
 
@@ -1511,16 +2453,21 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 *&      Form  BUILD_SORT_TABLE
 *&---------------------------------------------------------------------*
-* Default sort for the main item grid: most recent nota fiscal first
-* (DOCDAT descending), then most recently created candidate first
-* (CRE_DATE descending) as a tiebreaker. The user can still click any
-* column header to re-sort manually - this only sets the initial order.
+* Default sort for the main item grid: NFe Date, NFe Number and Item,
+* all ascending - this also groups every item of the same nota fiscal
+* together, which BUILD_NOTA_COLOR relies on (it physically re-sorts
+* GIT_ITEM the same way before banding, since GT_SORT here only
+* affects the ALV's own display, not GIT_ITEM's underlying row order).
+* The user can still click any column header to re-sort manually -
+* this only sets the initial order.
 *---------------------------------------------------------------------*
 FORM build_sort_table.
 
   CLEAR gt_sort.
 
-  APPEND VALUE #( spos = 1 fieldname = 'DOCDAT'  up = space down = abap_true ) TO gt_sort.
-  APPEND VALUE #( spos = 2 fieldname = 'CRE_DATE' up = space down = abap_true ) TO gt_sort.
+  APPEND VALUE #( spos = 1 fieldname = 'DOCDAT'  up = abap_true  down = space ) TO gt_sort.
+  APPEND VALUE #( spos = 2 fieldname = 'NFENUM'  up = abap_true  down = space ) TO gt_sort.
+  APPEND VALUE #( spos = 3 fieldname = 'SEQNR'   up = abap_true  down = space ) TO gt_sort.
+  APPEND VALUE #( spos = 4 fieldname = 'ITMNUM'  up = abap_true  down = space ) TO gt_sort.
 
 ENDFORM.
