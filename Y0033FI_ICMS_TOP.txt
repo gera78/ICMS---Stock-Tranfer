@@ -92,8 +92,9 @@ CONSTANTS:
 * (SELECT_CANDIDATE_DOCUMENTS, eDocument-driven/DIRECT=1, vs
 * SELECT_TRANSFER_CANDIDATES, J_1BNFDOC DIRECT=2 direct) are
 * being validated side by side, flip either flag here to isolate one
-* from the other during a search - both default to active, which is
-* today's behavior (additive, both run). Once the model is decided,
+* from the other during a search. Decision: the user cockpit runs the
+* eDocument-driven model only - GC_ENABLE_SEARCH_TRANSFER is off (same
+* as P_MODE2's default in the admin program). Once the model is decided,
 * delete these variables together with whichever PERFORM call(s) they
 * guard, in both Y0033FI_ICM_STOCK_TRANSFER and _ADM.
 * NOTE: Y0033FI_ICM_STOCK_TRANSFER_ADM no longer reads these two flags -
@@ -103,7 +104,7 @@ CONSTANTS:
 * still reads these DATA flags directly.
 DATA:
   gc_enable_search_edoc     TYPE abap_bool VALUE abap_true,
-  gc_enable_search_transfer TYPE abap_bool VALUE abap_true.
+  gc_enable_search_transfer TYPE abap_bool VALUE abap_false.
 
 * TEMPORARY SWITCH (TODO Q16): the accounting reference fields built in
 * POST_ONE_DOCUMENT (BAPIACGL09-ALLOC_NMBR/ITEM_TEXT) always use
