@@ -648,13 +648,28 @@ FORM execute_reversal.
 
     " Re-post the items that were still legitimately PST on the
     " reversed document, so they keep their benefit posted.
+    " Each item goes back to the approval status it originally had:
+    " AUTO_APPROVED if its cycle was auto-approved (Y0033FI_ICM_LOG is
+    " the only place that records this once the item is POSTED),
+    " APPROVED otherwise. The status is also set on LT_KEEP itself so
+    " that, if the re-post fails, POST_ONE_DOCUMENT releases the item
+    " back to that same status.
     IF lt_keep IS NOT INITIAL.
-      LOOP AT lt_keep INTO DATA(ls_keep_it).
-        UPDATE y0033fi_icm_item SET status = @gc_status-approved,
+      LOOP AT lt_keep ASSIGNING FIELD-SYMBOL(<ls_keep_it>).
+        SELECT SINGLE @abap_true FROM y0033fi_icm_log
+          INTO @DATA(lv_was_auto)
+          WHERE docnum = @<ls_keep_it>-docnum
+            AND itmnum = @<ls_keep_it>-itmnum
+            AND seqnr  = @<ls_keep_it>-seqnr
+            AND action = @gc_action-auto_approved.
+        <ls_keep_it>-status = COND #( WHEN sy-subrc = 0
+                                      THEN gc_status-auto_approved
+                                      ELSE gc_status-approved ).
+        UPDATE y0033fi_icm_item SET status = @<ls_keep_it>-status,
                                     belnr_fi = @space,
                                     gjahr_fi = @space,
                                     buzei_fi = 0
-          WHERE docnum = @ls_keep_it-docnum AND itmnum = @ls_keep_it-itmnum AND seqnr = @ls_keep_it-seqnr.
+          WHERE docnum = @<ls_keep_it>-docnum AND itmnum = @<ls_keep_it>-itmnum AND seqnr = @<ls_keep_it>-seqnr.
       ENDLOOP.
       COMMIT WORK AND WAIT.
       PERFORM post_one_document USING lt_keep.
