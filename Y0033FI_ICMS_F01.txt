@@ -525,6 +525,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     gwa_item-lane_match_level = lv_level.
     gwa_item-werks_dest  = ls_inc-plant.
     gwa_item-edoc_guid   = ls_edoc-edoc_guid.
+    gwa_item-edoc_create_date = ls_edoc-create_date.  " display only
     gwa_item-materialdoc = ls_inc-materialdoc.
     gwa_item-materialdoc_year = ls_inc-materialdoc_year.
 
@@ -1292,6 +1293,7 @@ FORM build_celltab.
           'STATUS_ICON'  TO lt_fieldnames,
           'STATUS_DESCR' TO lt_fieldnames,
           'EDOC_GUID'    TO lt_fieldnames,
+          'EDOC_CREATE_DATE' TO lt_fieldnames,
           'BELNR_FI'     TO lt_fieldnames,
           'BUZEI_FI'     TO lt_fieldnames,
           'CRE_USER'     TO lt_fieldnames,
@@ -2400,6 +2402,34 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
     ENDIF.
   ENDLOOP.
 
+  " EDOC_CREATE_DATE (display only, never persisted) - creation date of
+  " the eDocument actually shown in the EDOC_GUID column, read in bulk.
+  TYPES: BEGIN OF ty_edoc_disp,
+           edoc_guid TYPE edocument-edoc_guid,
+         END OF ty_edoc_disp.
+  DATA lt_edoc_disp TYPE STANDARD TABLE OF ty_edoc_disp WITH DEFAULT KEY.
+  LOOP AT git_item INTO gwa_item WHERE edoc_guid IS NOT INITIAL.
+    APPEND VALUE #( edoc_guid = gwa_item-edoc_guid ) TO lt_edoc_disp.
+  ENDLOOP.
+  SORT lt_edoc_disp BY edoc_guid.
+  DELETE ADJACENT DUPLICATES FROM lt_edoc_disp COMPARING edoc_guid.
+  IF lt_edoc_disp IS NOT INITIAL.
+    SELECT edoc_guid, create_date FROM edocument
+      INTO TABLE @DATA(lt_edoc_cdate)
+      FOR ALL ENTRIES IN @lt_edoc_disp
+      WHERE edoc_guid = @lt_edoc_disp-edoc_guid.
+    SORT lt_edoc_cdate BY edoc_guid.
+    LOOP AT git_item INTO gwa_item WHERE edoc_guid IS NOT INITIAL.
+      DATA(lv_tabix_cd) = sy-tabix.
+      READ TABLE lt_edoc_cdate INTO DATA(ls_edoc_cdate) BINARY SEARCH
+        WITH KEY edoc_guid = gwa_item-edoc_guid.
+      IF sy-subrc = 0.
+        gwa_item-edoc_create_date = ls_edoc_cdate-create_date.
+        MODIFY git_item FROM gwa_item INDEX lv_tabix_cd TRANSPORTING edoc_create_date.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -2527,6 +2557,15 @@ FORM build_fieldcat USING pu_mode TYPE c.
   ls_fcat-coltext   = 'eDocument'.
   ls_fcat-outputlen = 20.
   ls_fcat-hotspot   = abap_true.
+  APPEND ls_fcat TO gt_fcat.
+
+  " Display only - not a Y0033FI_ICM_ITEM field, see EDOC_CREATE_DATE
+  " in TY_ITEM (Y0033FI_ICMS_TOP).
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'EDOC_CREATE_DATE'.
+  ls_fcat-coltext   = 'eDoc Created on'.
+  ls_fcat-outputlen = 10.
+  ls_fcat-datatype  = 'DATS'.
   APPEND ls_fcat TO gt_fcat.
 
   " A607 access-key fields (see DETERMINE_BENEFIT_PERCENTAGE) - shown
