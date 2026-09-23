@@ -38,7 +38,7 @@ START-OF-SELECTION.
     " no SY-BATCH short-circuit, so a variant run in background with
     " P_MNEW set and every other filter left blank would otherwise
     " search the company's entire eDocument history unbounded.
-    PERFORM check_search_filters.
+    PERFORM check_search_filters USING gc_enable_search_edoc.
 
     IF gc_enable_search_edoc = abap_true.
       PERFORM select_candidate_documents USING p_bukrs.

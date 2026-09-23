@@ -31,8 +31,9 @@
 FORM auto_approve_candidates USING pu_bukrs   TYPE bukrs
                                    pu_id_exec TYPE char20.
 
-  IF s_datum[]  IS INITIAL AND s_nfenum[] IS INITIAL AND s_docnum[] IS INITIAL
-     AND s_series[] IS INITIAL AND s_docdat[] IS INITIAL AND s_acckey[] IS INITIAL.
+  DATA lv_filters_ok TYPE abap_bool.
+  PERFORM has_search_filters USING p_mode1 CHANGING lv_filters_ok.
+  IF lv_filters_ok = abap_false.
     IF sy-batch = abap_true.
       WRITE: / 'Auto Approved skipped: fill in at least one filter besides Company Code'.
     ELSE.

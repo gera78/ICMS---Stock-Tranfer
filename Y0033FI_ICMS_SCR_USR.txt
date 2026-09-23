@@ -19,11 +19,19 @@ SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
 * and direction now come entirely from Y0033FI_ICM_LANE (see FORM
 * MATCH_LANE / SELECT_CANDIDATE_DOCUMENTS in Y0033FI_ICMS_F01).
   SELECT-OPTIONS:
+* Date filters - each one means the same thing in every mode:
+*   S_DATUM  = eDocument creation date (EDOCUMENT-CREATE_DATE). Only
+*              narrows items that come from an eDocument - the stock-
+*              transfer search model has none and ignores it.
+*   S_DOCDAT = nota fiscal date (J_1BNFDOC-DOCDAT / ITEM-DOCDAT).
+*   S_LCTO   = posting date of the accounting document (BUDAT_FI) -
+*              view mode only.
+*   S_ACTDAT = date an action happened (Y0033FI_ICM_LOG) - view mode only.
     s_datum  FOR sy-datum,                        " eDocument creation date
     s_nfenum FOR j_1bnfdoc-nfenum,                " NFe number - zero-padded automatically, see SELECT_CANDIDATE_DOCUMENTS
     s_docnum FOR j_1bnfdoc-docnum,                " internal nota fiscal document number
     s_series FOR j_1bnfdoc-series,                " NFe series
-    s_docdat FOR j_1bnfdoc-docdat MODIF ID fs,    " nota fiscal creation date - search mode only (view mode already filters this via S_DATUM, see REFRESH_FROM_DB)
+    s_docdat FOR j_1bnfdoc-docdat,                " nota fiscal date - every mode (search: J_1BNFDOC-DOCDAT, view: ITEM-DOCDAT, see REFRESH_FROM_DB)
     s_acckey FOR y0033fi_icm_edoc-accesskey,      " NF-e access key (44 digits) - typed against Y0033FI_ICM_EDOC-ACCESSKEY (CHAR44), not the source table directly: EDOBRINCOMING-ACCESSKEY is TYPE STRING, which selection-screen fields can't use
 * S_LCTO only applies in view mode - nothing is posted yet in search
 * mode, so it is hidden there (same MODIF ID FV as the status filter).
@@ -225,7 +233,7 @@ AT SELECTION-SCREEN.
     ENDIF.
     PERFORM check_bukrs_authority USING p_bukrs.
     IF p_mnew = 'X'.
-      PERFORM check_search_filters.
+      PERFORM check_search_filters USING gc_enable_search_edoc.
     ENDIF.
   ENDIF.
 

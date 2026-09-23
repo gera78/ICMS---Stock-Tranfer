@@ -46,12 +46,43 @@ ENDFORM.
 * "View My Candidates" is not checked here - it only ever reads our
 * own already-bounded Y0033FI_ICM_ITEM data, not the company-wide
 * eDocument tables.
+*
+* PU_EDOC_MODEL = is the eDocument-driven search model
+* (SELECT_CANDIDATE_DOCUMENTS) part of this run? S_DATUM (eDocument
+* creation date) and S_ACCKEY (NF-e access key) only narrow THAT model -
+* the stock-transfer model (SELECT_TRANSFER_CANDIDATES) reads J_1BNFDOC
+* directly and ignores both - so they only count as "a filter" when
+* the eDocument model actually runs. Otherwise a run with only the
+* transfer model and only S_DATUM filled would pass this check and
+* still read the whole company history, unbounded.
 *---------------------------------------------------------------------*
-FORM check_search_filters.
+FORM check_search_filters USING pu_edoc_model TYPE abap_bool.
 
-  IF s_datum[]  IS INITIAL AND s_nfenum[] IS INITIAL AND s_docnum[] IS INITIAL
-     AND s_series[] IS INITIAL AND s_docdat[] IS INITIAL AND s_acckey[] IS INITIAL.
+  DATA lv_ok TYPE abap_bool.
+  PERFORM has_search_filters USING pu_edoc_model CHANGING lv_ok.
+  IF lv_ok = abap_false.
     MESSAGE 'Fill in at least one filter besides Company Code' TYPE 'E'.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  HAS_SEARCH_FILTERS
+*&---------------------------------------------------------------------*
+* Same rule as CHECK_SEARCH_FILTERS, without raising the message - for
+* callers that must not stop the run (AUTO_APPROVE_CANDIDATES in a
+* background job, see Y0033FI_ICMS_F02).
+*---------------------------------------------------------------------*
+FORM has_search_filters USING    pu_edoc_model TYPE abap_bool
+                        CHANGING pc_ok         TYPE abap_bool.
+
+  pc_ok = abap_false.
+  IF s_nfenum[] IS NOT INITIAL OR s_docnum[] IS NOT INITIAL
+     OR s_series[] IS NOT INITIAL OR s_docdat[] IS NOT INITIAL.
+    pc_ok = abap_true.
+  ELSEIF pu_edoc_model = abap_true
+     AND ( s_datum[] IS NOT INITIAL OR s_acckey[] IS NOT INITIAL ).
+    pc_ok = abap_true.
   ENDIF.
 
 ENDFORM.
@@ -2218,15 +2249,57 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
     DELETE ADJACENT DUPLICATES FROM lt_log_keys COMPARING docnum itmnum seqnr.
   ENDIF.
 
+  " DOCDAT is the nota fiscal date - filtered by S_DOCDAT, same as in
+  " search mode. S_DATUM (eDocument creation date) is applied right
+  " below, against EDOCUMENT, not against DOCDAT (it used to be
+  " compared with DOCDAT here, so an eDocument's own CREATE_DATE
+  " typed into S_DATUM never matched anything in view mode).
   SELECT * FROM y0033fi_icm_item
     INTO TABLE @lt_db
     WHERE bukrs      = @pu_bukrs
-      AND docdat     IN @s_datum
+      AND docdat     IN @s_docdat
       AND nfenum     IN @lt_nfenum
       AND docnum     IN @s_docnum
       AND series     IN @s_series
       AND edoc_guid  IN @lr_guid_acckey
       AND budat_fi   IN @s_lcto.
+
+  " S_DATUM = eDocument creation date (EDOCUMENT-CREATE_DATE), same
+  " meaning as in search mode - checked against the eDocument this item
+  " was actually created from (the persisted EDOC_GUID, BEFORE it gets
+  " replaced below by the latest known GUID for display). Items with no
+  " eDocument at all (stock-transfer model, SELECT_TRANSFER_CANDIDATES,
+  " saves EDOC_GUID blank) are not restricted by it - same as in search
+  " mode, where that model ignores S_DATUM too.
+  IF s_datum[] IS NOT INITIAL AND lt_db IS NOT INITIAL.
+    TYPES: BEGIN OF ty_edoc_key,
+             edoc_guid TYPE edocument-edoc_guid,
+           END OF ty_edoc_key.
+    DATA lt_edoc_key TYPE STANDARD TABLE OF ty_edoc_key WITH DEFAULT KEY.
+    LOOP AT lt_db INTO DATA(ls_db_guid) WHERE edoc_guid IS NOT INITIAL.
+      APPEND VALUE #( edoc_guid = ls_db_guid-edoc_guid ) TO lt_edoc_key.
+    ENDLOOP.
+    SORT lt_edoc_key BY edoc_guid.
+    DELETE ADJACENT DUPLICATES FROM lt_edoc_key COMPARING edoc_guid.
+
+    DATA lt_edoc_in_range TYPE STANDARD TABLE OF ty_edoc_key WITH DEFAULT KEY.
+    IF lt_edoc_key IS NOT INITIAL.
+      SELECT edoc_guid FROM edocument
+        INTO TABLE @lt_edoc_in_range
+        FOR ALL ENTRIES IN @lt_edoc_key
+        WHERE edoc_guid   = @lt_edoc_key-edoc_guid
+          AND create_date IN @s_datum.
+      SORT lt_edoc_in_range BY edoc_guid.
+    ENDIF.
+
+    LOOP AT lt_db INTO ls_db_guid WHERE edoc_guid IS NOT INITIAL.
+      READ TABLE lt_edoc_in_range TRANSPORTING NO FIELDS BINARY SEARCH
+        WITH KEY edoc_guid = ls_db_guid-edoc_guid.
+      IF sy-subrc <> 0.
+        DELETE lt_db.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
 
   CLEAR git_item.
   LOOP AT lt_db INTO DATA(ls_db).

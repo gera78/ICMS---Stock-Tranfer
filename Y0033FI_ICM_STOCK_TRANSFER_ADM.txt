@@ -87,7 +87,7 @@ START-OF-SELECTION.
     " Not reachable from a background job (SY-BATCH already returned
     " above), but kept for defense-in-depth/consistency with the user
     " cockpit's own equivalent safety net.
-    PERFORM check_search_filters.
+    PERFORM check_search_filters USING p_mode1.
     " Admin uses its own P_MODE1/P_MODE2 checkboxes (Y0033FI_ICMS_SCR_ADM)
     " instead of the GC_ENABLE_SEARCH_EDOC/_TRANSFER test switches -
     " lets the two candidate-search models be isolated/combined per run
