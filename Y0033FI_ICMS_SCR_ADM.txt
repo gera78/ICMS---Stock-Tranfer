@@ -71,17 +71,18 @@ PARAMETERS:
   p_madm  RADIOBUTTON GROUP mod DEFAULT 'X',             " admin review (original behavior)
   p_mparm RADIOBUTTON GROUP mod,                         " General Parameters (screen 400)
   p_mlane RADIOBUTTON GROUP mod.                         " Maintain Corridors (screen 300)
-* Auto Approved (021) - independent of the mode above. When checked,
-* the run first picks up every new candidate the search chain finds
-* (the same rows "Search New Candidates" shows as 900 - Ready to Save)
-* and persists it directly as 021 - Auto Approved, skipping the manual
+* Auto Approved (021) - Admin Review (P_MADM) only: shown only in that
+* mode (MODIF ID AU) and ignored in any other. When checked, the run
+* first picks up every new candidate the search chain finds (the same
+* rows "Search New Candidates" shows as 900 - Ready to Save) and
+* persists it directly as 021 - Auto Approved, skipping the manual
 * Save (010) + Approve (020) steps - see AUTO_APPROVE_CANDIDATES
-* (Y0033FI_ICMS_F02). Works both online and in background. Uses the
-* same search filters/model switches as P_MNEW, which is why those
-* (MODIF ID FA) stay visible whenever this is checked.
-SELECTION-SCREEN SKIP.
+* (Y0033FI_ICMS_F02). Online it asks for confirmation first (popup);
+* in background it runs unattended. Uses the same search filters/model
+* switches as P_MNEW, which is why those (MODIF ID FA) stay visible
+* whenever this is checked.
 PARAMETERS:
-  p_auto  TYPE char1 AS CHECKBOX USER-COMMAND auto_chg.  " process Auto Approved (021)
+  p_auto  TYPE char1 AS CHECKBOX USER-COMMAND auto_chg MODIF ID au.  " process Auto Approved (021) - Admin Review only
 SELECTION-SCREEN END OF BLOCK b2.
 
 SELECTION-SCREEN BEGIN OF BLOCK b4 WITH FRAME TITLE TEXT-b04.
@@ -260,7 +261,11 @@ AT SELECTION-SCREEN OUTPUT.
       screen-active = 0.  " hide entirely - only applies when searching new candidates
       MODIFY SCREEN.
     ENDIF.
-    IF screen-group1 = 'FA' AND p_mnew <> 'X' AND p_auto <> 'X'.
+    IF screen-group1 = 'AU' AND p_madm <> 'X'.
+      screen-active = 0.  " Auto Approved - Admin Review only
+      MODIFY SCREEN.
+    ENDIF.
+    IF screen-group1 = 'FA' AND p_mnew <> 'X' AND NOT ( p_madm = 'X' AND p_auto = 'X' ).
       screen-active = 0.  " search-only filters/model switches - also needed by Auto Approved (P_AUTO)
       MODIFY SCREEN.
     ENDIF.
@@ -290,7 +295,7 @@ AT SELECTION-SCREEN.
       MESSAGE 'Enter a Company Code' TYPE 'E'.
     ENDIF.
     PERFORM check_bukrs_authority USING p_bukrs.
-    IF p_mnew = 'X' OR p_auto = 'X'.
+    IF p_mnew = 'X' OR ( p_madm = 'X' AND p_auto = 'X' ).
       PERFORM check_search_filters.
     ENDIF.
   ENDIF.
@@ -304,6 +309,11 @@ AT SELECTION-SCREEN.
 * their own, so nothing to reset there.
   IF sy-ucomm = 'MOD_CHG'.
     PERFORM set_status_filter_defaults.
+    " P_AUTO only exists in Admin Review - leaving that mode unchecks
+    " it, so a hidden, still-checked flag can't surprise anyone later.
+    IF p_madm <> 'X'.
+      p_auto = abap_false.
+    ENDIF.
   ENDIF.
 
 * "Master" checkboxes (B3B) - group-toggle the real filter checkboxes

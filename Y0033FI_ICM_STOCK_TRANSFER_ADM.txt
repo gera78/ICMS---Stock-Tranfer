@@ -19,7 +19,8 @@
 *& The LANE/PARAM buttons on screen 200 still work too - this is just
 *& a faster path that skips loading any item list first.
 *&
-*& P_AUTO (Auto Approved) - when checked, every new candidate found
+*& P_AUTO (Auto Approved, Admin Review only, confirmed via popup
+*& online) - when checked, every new candidate found
 *& by the search chain is persisted straight as 021 - Auto Approved
 *& (see FORM AUTO_APPROVE_CANDIDATES in Y0033FI_ICMS_F02) before
 *& anything else runs, online and in background. POST_RELEASED_ITEMS
@@ -56,8 +57,37 @@ START-OF-SELECTION.
   PERFORM get_company_currency USING p_bukrs CHANGING gv_waers.
   PERFORM get_params USING p_bukrs.
 
-  IF p_auto = abap_true.
-    PERFORM auto_approve_candidates USING p_bukrs gv_id_exec.
+  " Auto Approved - Admin Review only (P_AUTO is hidden/ignored in any
+  " other mode, background included: the job variant must be saved
+  " with Admin Review + P_AUTO). Online, ask for confirmation first -
+  " it saves and approves every candidate found, with no selection.
+  IF p_auto = abap_true AND p_madm = abap_true.
+    DATA lv_auto_answer TYPE c LENGTH 1.
+    IF sy-batch = abap_true.
+      lv_auto_answer = '1'.
+    ELSE.
+      CALL FUNCTION 'POPUP_TO_CONFIRM'
+        EXPORTING
+          titlebar              = 'Auto Approved'
+          text_question         = 'Every new candidate found will be saved and approved automatically (021). Continue?'
+          text_button_1         = 'Yes'
+          text_button_2         = 'No'
+          default_button        = '2'
+          display_cancel_button = abap_false
+        IMPORTING
+          answer                = lv_auto_answer
+        EXCEPTIONS
+          text_not_found        = 1
+          OTHERS                = 2.
+      IF sy-subrc <> 0.
+        CLEAR lv_auto_answer.
+      ENDIF.
+    ENDIF.
+    IF lv_auto_answer = '1'.
+      PERFORM auto_approve_candidates USING p_bukrs gv_id_exec.
+    ELSE.
+      MESSAGE 'Auto Approved not executed' TYPE 'S'.
+    ENDIF.
   ENDIF.
 
   IF sy-batch = abap_true.
