@@ -30,10 +30,99 @@ FORM post_released_items.
 
   SELECT * FROM y0033fi_icm_item
     INTO TABLE @DATA(lt_approved)
-    WHERE status = @gc_status-approved.
+    WHERE status = @gc_status-approved
+       OR status = @gc_status-post_failed.
+
+  " Online (screen 200 "Create Document(s)" button): only post what the
+  " admin actually marked with SEL in the ALV - GIT_ITEM holds exactly
+  " this run's admin review data, so any row not selected there (or no
+  " longer present) is dropped before posting. The background job has
+  " no GIT_ITEM/screen at all and must keep posting every matching item
+  " regardless of any screen state, so this only applies interactively.
+  IF sy-batch = abap_false.
+    LOOP AT lt_approved INTO DATA(ls_check).
+      READ TABLE git_item WITH KEY docnum = ls_check-docnum
+                                    itmnum = ls_check-itmnum
+                                    seqnr  = ls_check-seqnr
+        INTO DATA(ls_git_check).
+      IF sy-subrc <> 0 OR ls_git_check-sel <> abap_true.
+        DELETE lt_approved.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+  " Skip items whose nota fiscal was already cancelled (J_1BNFDOC-CANCEL)
+  " by the time this run tries to post them - posting first and relying
+  " on CHECK_NF_CANCELLATION/reversal to clean up afterward would create
+  " a real FI document for a nota that's already void. Flagged with its
+  " own status (CANCELLED_PRE_POST) instead, so these never reach GL and
+  " the user can filter "victims of cancellation" before posting.
+  IF lt_approved IS NOT INITIAL.
+    " Structured single-field driving table (not a bare elementary
+    " itab) for FOR ALL ENTRIES - same workaround already used for
+    " LT_NFE_KEYS in SELECT_CANDIDATE_DOCUMENTS (Y0033FI_ICMS_F01).
+    TYPES: BEGIN OF ty_docnum_key,
+             docnum TYPE j_1bnfdoc-docnum,
+           END OF ty_docnum_key.
+    DATA lt_docnum_check TYPE STANDARD TABLE OF ty_docnum_key WITH DEFAULT KEY.
+    LOOP AT lt_approved INTO DATA(ls_appr_chk).
+      APPEND VALUE #( docnum = ls_appr_chk-docnum ) TO lt_docnum_check.
+    ENDLOOP.
+    SORT lt_docnum_check BY docnum.
+    DELETE ADJACENT DUPLICATES FROM lt_docnum_check COMPARING docnum.
+
+    DATA lt_cancelled_docnum TYPE STANDARD TABLE OF j_1bnfdoc-docnum WITH DEFAULT KEY.
+    SELECT docnum FROM j_1bnfdoc
+      INTO TABLE @lt_cancelled_docnum
+      FOR ALL ENTRIES IN @lt_docnum_check
+      WHERE docnum = @lt_docnum_check-docnum
+        AND cancel = @abap_true.
+    SORT lt_cancelled_docnum BY table_line.
+
+    DATA lv_victims TYPE i.
+    LOOP AT lt_approved INTO DATA(ls_victim).
+      READ TABLE lt_cancelled_docnum WITH KEY table_line = ls_victim-docnum
+        TRANSPORTING NO FIELDS BINARY SEARCH.
+      CHECK sy-subrc = 0.
+
+      DATA lv_subrc_v TYPE sy-subrc.
+      PERFORM enqueue_item USING ls_victim-docnum ls_victim-itmnum ls_victim-seqnr CHANGING lv_subrc_v.
+      IF lv_subrc_v <> 0.
+        CONTINUE.
+      ENDIF.
+
+      " STATUS = LS_VICTIM-STATUS guards against a stale batch, same as
+      " REQUEST_REVERSAL - if another session already moved this item on
+      " since LT_APPROVED was read, nothing is changed/logged here.
+      UPDATE y0033fi_icm_item SET status = @gc_status-cancelled_pre_post
+        WHERE docnum = @ls_victim-docnum AND itmnum = @ls_victim-itmnum AND seqnr = @ls_victim-seqnr
+          AND status = @ls_victim-status.
+
+      IF sy-subrc = 0.
+        PERFORM write_log USING ls_victim gc_action-cancelled_pre_post ls_victim-status gc_status-cancelled_pre_post
+                                 'Nota fiscal already cancelled - skipped before posting'.
+        lv_victims = lv_victims + 1.
+      ENDIF.
+
+      PERFORM dequeue_item USING ls_victim-docnum ls_victim-itmnum ls_victim-seqnr.
+      DELETE lt_approved.
+    ENDLOOP.
+
+    IF lv_victims > 0.
+      COMMIT WORK AND WAIT.
+    ENDIF.
+  ENDIF.
 
   IF lt_approved IS INITIAL.
-    MESSAGE e007(y0033icms).
+    " Nothing to post is a normal, expected outcome (not every run has
+    " approved items, or - online - nothing was marked) - TYPE E would
+    " flag the background job as ended in error in SM37 even though
+    " nothing actually went wrong, so it is only used interactively.
+    IF sy-batch = abap_true.
+      MESSAGE s007(y0033icms).
+    ELSE.
+      MESSAGE e007(y0033icms).
+    ENDIF.
     RETURN.
   ENDIF.
 
@@ -90,6 +179,99 @@ FORM post_released_items.
     ENDWHILE.
 
   ENDLOOP.
+
+  " Summary message - POST_ONE_DOCUMENT never reports back to this FORM
+  " (it updates Y0033FI_ICM_ITEM directly, chunk by chunk), so the only
+  " reliable way to know the outcome is to re-read the same items this
+  " run started with and see where each one landed.
+  DATA lv_posted_ok   TYPE i.
+  DATA lv_posted_fail TYPE i.
+  LOOP AT lt_approved INTO DATA(ls_result).
+    SELECT SINGLE status FROM y0033fi_icm_item
+      INTO @DATA(lv_result_status)
+      WHERE docnum = @ls_result-docnum AND itmnum = @ls_result-itmnum AND seqnr = @ls_result-seqnr.
+    IF lv_result_status = gc_status-posted.
+      lv_posted_ok = lv_posted_ok + 1.
+    ELSE.
+      lv_posted_fail = lv_posted_fail + 1.
+    ENDIF.
+  ENDLOOP.
+
+  IF lv_posted_fail > 0.
+    MESSAGE s022(y0033icms) WITH lv_posted_ok lv_posted_fail DISPLAY LIKE 'E'.
+  ELSE.
+    MESSAGE s022(y0033icms) WITH lv_posted_ok lv_posted_fail.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  RESOLVE_REF_DOCNUM
+*&---------------------------------------------------------------------*
+* Returns the DOCNUM to use on the accounting reference fields
+* (ALLOC_NMBR/ITEM_TEXT, see POST_ONE_DOCUMENT) for one item -
+* PU_ITEM-DOCNUM (today's behavior) unless GV_USE_ORIG_DOCNUM_REF
+* (Y0033FI_ICMS_TOP, TODO Q16) is set, in which case the ORIGIN nota
+* fiscal's own J_1BNFDOC row (DIRECT = 2, same NFENUM+SERIES+BUKRS) is
+* looked up instead. Falls back to PU_ITEM-DOCNUM whenever that lookup
+* finds nothing, so this switch can never block a posting that would
+* otherwise succeed. No DDIC change - resolved here, at posting time
+* only, never persisted on Y0033FI_ICM_ITEM.
+*---------------------------------------------------------------------*
+FORM resolve_ref_docnum USING pu_item TYPE y0033fi_icm_item
+                     CHANGING pc_docnum TYPE j_1bdocnum.
+
+  pc_docnum = pu_item-docnum.
+
+  CHECK gv_use_orig_docnum_ref = abap_true.
+
+  SELECT SINGLE docnum FROM j_1bnfdoc
+    INTO @DATA(lv_orig_docnum)
+    WHERE bukrs  = @pu_item-bukrs
+      AND nfenum = @pu_item-nfenum
+      AND series = @pu_item-series
+      AND direct = '2'.
+  IF sy-subrc = 0.
+    pc_docnum = lv_orig_docnum.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  RESOLVE_REF_WERKS
+*&---------------------------------------------------------------------*
+* Same concept as RESOLVE_REF_DOCNUM above, for the accounting
+* document's plant (BAPIACGL09-PLANT, see POST_ONE_DOCUMENT):
+* PU_ITEM-WERKS_DEST (today's behavior, the destination plant) unless
+* GV_USE_ORIG_WERKS_REF (Y0033FI_ICMS_TOP) is set, in which case the
+* ORIGIN nota fiscal's own branch (J_1BNFDOC DIRECT = 2, same
+* NFENUM+SERIES+BUKRS) is resolved to its plant via T001W-J_1BBRANCH -
+* the same branch->plant lookup SELECT_TRANSFER_CANDIDATES already
+* does for the destination side (Y0033FI_ICMS_F01). Falls back to
+* PU_ITEM-WERKS_DEST whenever either lookup finds nothing, so this
+* switch can never block a posting that would otherwise succeed.
+*---------------------------------------------------------------------*
+FORM resolve_ref_werks USING pu_item TYPE y0033fi_icm_item
+                     CHANGING pc_werks TYPE werks_d.
+
+  pc_werks = pu_item-werks_dest.
+
+  CHECK gv_use_orig_werks_ref = abap_true.
+
+  SELECT SINGLE branch FROM j_1bnfdoc
+    INTO @DATA(lv_orig_branch)
+    WHERE bukrs  = @pu_item-bukrs
+      AND nfenum = @pu_item-nfenum
+      AND series = @pu_item-series
+      AND direct = '2'.
+  CHECK sy-subrc = 0.
+
+  SELECT SINGLE werks FROM t001w
+    INTO @DATA(lv_orig_werks)
+    WHERE j_1bbranch = @lv_orig_branch.
+  IF sy-subrc = 0.
+    pc_werks = lv_orig_werks.
+  ENDIF.
 
 ENDFORM.
 
@@ -162,9 +344,30 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
 
   READ TABLE pu_chunk INTO DATA(ls_any) INDEX 1.
 
+* If any item in this chunk is already POST_FAILED, this is a retry -
+* we already know posting with the nota fiscal's own date failed
+* before (see GC_STATUS-POST_FAILED), so there is no point trying
+* that same date again. Go straight to today's date (current period)
+* instead of wasting a cycle on a date we already know will fail.
+* BLDAT (document date) never changes - only BUDAT (posting date), same
+* as the existing period-closed fallback below.
   DATA(lv_bldat) = ls_any-docdat.
-  DATA(lv_budat) = ls_any-docdat.
-  DATA(lv_fallback) = abap_false.
+  DATA(lv_is_retry) = xsdbool( line_exists( pu_chunk[ status = gc_status-post_failed ] ) ).
+  DATA(lv_budat) = COND #( WHEN lv_is_retry = abap_true THEN sy-datum ELSE ls_any-docdat ).
+  DATA(lv_fallback) = lv_is_retry.
+
+  " BKPF-TCODE otherwise records SE38 (this report's own execution
+  " context, not a real transaction) - the previous attempt to fix
+  " this via EXTENSION1/FIELD1='BKPF-TCODE' broke the posting itself
+  " ("Inconsistent FI/CO document header data"), since EXTENSION1
+  " needs a matching FI BAdI to interpret it, which doesn't exist
+  " here. SY-TCODE itself is only read (not enforced) by the posting
+  " kernel, so swapping it just for this BAPI call and restoring it
+  " right after is safe and doesn't touch document consistency.
+  DATA(lv_saved_tcode) = sy-tcode.
+  IF gv_program_id IS NOT INITIAL.
+    sy-tcode = gv_program_id.
+  ENDIF.
 
   DO 2 TIMES.
     CLEAR: ls_header, lt_gl, lt_cur, lt_return, ls_err, lt_buzei.
@@ -184,6 +387,12 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
 
     LOOP AT pu_chunk INTO ls_it.
       lv_itemno = lv_itemno + 1.
+
+      DATA lv_ref_docnum TYPE j_1bdocnum.
+      PERFORM resolve_ref_docnum USING ls_it CHANGING lv_ref_docnum.
+      DATA lv_ref_werks TYPE werks_d.
+      PERFORM resolve_ref_werks USING ls_it CHANGING lv_ref_werks.
+
       CLEAR ls_gl.
       ls_gl-itemno_acc = lv_itemno.
       ls_gl-gl_account = gv_gl_debit.
@@ -197,9 +406,9 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       " makes the posting fail for this account (blank or not).
       ls_gl-profit_ctr = ls_it-prctr.   " sourced from J_1BNFLIN-PRCTR - may be blank
       ls_gl-material   = ls_it-matnr.
-      ls_gl-plant      = ls_it-werks_dest.
-      ls_gl-alloc_nmbr = |{ ls_it-docnum }{ ls_it-itmnum }|.  " TODO (Q16)
-      ls_gl-item_text  = |ICMS benefit { ls_it-docnum }/{ ls_it-itmnum }|.
+      ls_gl-plant      = lv_ref_werks.  " TODO (Q16) - see RESOLVE_REF_WERKS
+      ls_gl-alloc_nmbr = |{ lv_ref_docnum }{ ls_it-itmnum }|.  " TODO (Q16) - see RESOLVE_REF_DOCNUM
+      ls_gl-item_text  = |ICMS benefit { lv_ref_docnum }/{ ls_it-itmnum }|.
       APPEND ls_gl TO lt_gl.
 
       CLEAR ls_cur.
@@ -224,9 +433,9 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       ls_gl-businessplace = ls_it-branch.
       ls_gl-profit_ctr = ls_it-prctr.
       ls_gl-material   = ls_it-matnr.
-      ls_gl-plant      = ls_it-werks_dest.
-      ls_gl-alloc_nmbr = |{ ls_it-docnum }{ ls_it-itmnum }|.
-      ls_gl-item_text  = |ICMS benefit { ls_it-docnum }/{ ls_it-itmnum }|.
+      ls_gl-plant      = lv_ref_werks.  " TODO (Q16) - see RESOLVE_REF_WERKS
+      ls_gl-alloc_nmbr = |{ lv_ref_docnum }{ ls_it-itmnum }|.  " TODO (Q16) - see RESOLVE_REF_DOCNUM
+      ls_gl-item_text  = |ICMS benefit { lv_ref_docnum }/{ ls_it-itmnum }|.
       APPEND ls_gl TO lt_gl.
 
       CLEAR ls_cur.
@@ -235,16 +444,6 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       ls_cur-amt_doccur = ls_it-credit_amount * -1.
       APPEND ls_cur TO lt_cur.
     ENDLOOP.
-
-    " REVERTED: EXTENSION1 with FIELD1 = 'BKPF-TCODE' was added to
-    " record GV_PROGRAM_ID as the document's originating transaction
-    " (otherwise the BAPI records "SE38", not meaningful for a
-    " background/report program). Removed again - a real test right
-    " after adding it produced "FI/CO interface: Inconsistent FI/CO
-    " document header data for updating", a classic symptom of a bad
-    " EXTENSION1 entry. 'BKPF-TCODE' was never confirmed as a valid
-    " FIELD1 target for this BAPI/release - do not re-add without
-    " confirming the correct target first.
 
     CALL FUNCTION 'BAPI_ACC_DOCUMENT_POST'
       EXPORTING
@@ -265,9 +464,18 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
     CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
 
     " Period-closed heuristic: message class F5, number 053 is the
-    " standard "posting period not open" error. Retry once with
-    " BUDAT = today, which is virtually always in an open period.
-    IF ls_err-id = 'F5' AND ls_err-number = '053' AND lv_fallback = abap_false.
+    " standard "posting period not open" error. Retry immediately (same
+    " run, not the next background cycle) with BUDAT = today, which is
+    " virtually always in an open period.
+    "
+    " Search the WHOLE LT_RETURN table for F5/053, not just LS_ERR (the
+    " primary error message used above for the POST_FAILED log/MSG) -
+    " BAPI_ACC_DOCUMENT_POST commonly wraps the real cause behind a
+    " generic "Error in document: BKPFF ..." message that also comes
+    " back as TYPE E, and when THAT one lands first in the table (very
+    " common), LS_ERR held it instead of the real F5/053 entry, so this
+    " check silently never matched and the retry never happened.
+    IF lv_fallback = abap_false AND line_exists( lt_return[ id = 'F5' number = '053' ] ).
       lv_budat    = sy-datum.
       lv_fallback = abap_true.
       CONTINUE.
@@ -276,20 +484,26 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
     ENDIF.
   ENDDO.
 
+  sy-tcode = lv_saved_tcode. " restore immediately - never leak the fake value beyond this BAPI call
+
   IF ls_err IS NOT INITIAL.
     PERFORM smart_case CHANGING ls_err-message.
-    " Posting failed - release the chunk back to APR with the primary
+    " Posting failed - release the chunk to POST_FAILED (not back to
+    " APPROVED - that would look identical to "never attempted"; see
+    " design discussion on GC_STATUS-POST_FAILED) with the primary
     " error message shown on the item, so it can be corrected and
-    " retried. Exactly ONE log row per item records the real status
-    " transition (POSTING -> APPROVED); every OTHER message the BAPI
-    " returned is logged as BAPI_DETAIL below, with STATUS_FROM =
+    " retried - POST_RELEASED_ITEMS picks up POST_FAILED items the
+    " same as APPROVED ones, whether run interactively or in
+    " background. Exactly ONE log row per item records the real status
+    " transition (POSTING -> POST_FAILED); every OTHER message the
+    " BAPI returned is logged as BAPI_DETAIL below, with STATUS_FROM =
     " STATUS_TO, since it's supplementary detail about the SAME
     " failure, not a separate transition.
     LOOP AT pu_chunk INTO ls_it.
-      UPDATE y0033fi_icm_item SET status = @gc_status-approved,
+      UPDATE y0033fi_icm_item SET status = @gc_status-post_failed,
                                   msg    = @ls_err-message
         WHERE docnum = @ls_it-docnum AND itmnum = @ls_it-itmnum AND seqnr = @ls_it-seqnr.
-      PERFORM write_log USING ls_it gc_action-error gc_status-posting gc_status-approved
+      PERFORM write_log USING ls_it gc_action-error gc_status-posting gc_status-post_failed
                                ls_err-message.
       PERFORM dequeue_item USING ls_it-docnum ls_it-itmnum ls_it-seqnr.
     ENDLOOP.
@@ -304,7 +518,7 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       DATA(lv_ret_msg) = ls_ret_msg-message.
       PERFORM smart_case CHANGING lv_ret_msg.
       LOOP AT pu_chunk INTO ls_it.
-        PERFORM write_log USING ls_it gc_action-bapi_detail gc_status-approved gc_status-approved
+        PERFORM write_log USING ls_it gc_action-bapi_detail gc_status-post_failed gc_status-post_failed
                                  lv_ret_msg.
       ENDLOOP.
     ENDLOOP.
@@ -355,8 +569,16 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
                                 buzei_fi = @ls_buzei-buzei,
                                 bldat_fi = @lv_bldat,
                                 budat_fi = @lv_budat,
-                                period_fallback = @lv_fallback
+                                period_fallback = @lv_fallback,
+                                pst_user = @sy-uname,
+                                pst_date = @sy-datum,
+                                pst_time = @sy-uzeit,
+                                msg      = @space
       WHERE docnum = @ls_it-docnum AND itmnum = @ls_it-itmnum AND seqnr = @ls_it-seqnr.
+    " Clears any MSG left over from a previous failed attempt
+    " (POST_FAILED) - now that this cycle succeeded, the item looks
+    " like it still has a pending error otherwise. The full history
+    " (including that earlier failure) stays in Y0033FI_ICM_LOG.
 
     ls_it-belnr_fi = lv_belnr.
     ls_it-gjahr_fi = lv_gjahr.
@@ -399,8 +621,34 @@ FORM execute_reversal.
     INTO TABLE @DATA(lt_strq)
     WHERE status = @gc_status-reversal_requested.
 
+  " Online (screen 200 "Execute Reversal" button): only reverse what
+  " the admin actually marked with SEL - same reasoning as
+  " POST_RELEASED_ITEMS. SCR_200 also runs ENSURE_FULL_DOCNUM_SELECTION
+  " before calling this FORM, so a partial selection within one nota's
+  " items (which would leave a sibling REVERSAL_REQUESTED row stranded,
+  " since a reversal always reverses the WHOLE original accounting
+  " document) gets caught there first, not here.
+  IF sy-batch = abap_false.
+    LOOP AT lt_strq INTO DATA(ls_check).
+      READ TABLE git_item WITH KEY docnum = ls_check-docnum
+                                    itmnum = ls_check-itmnum
+                                    seqnr  = ls_check-seqnr
+        INTO DATA(ls_git_check).
+      IF sy-subrc <> 0 OR ls_git_check-sel <> abap_true.
+        DELETE lt_strq.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
   IF lt_strq IS INITIAL.
-    MESSAGE e008(y0033icms).
+    " Same reasoning as POST_RELEASED_ITEMS above - no reversal
+    " requests pending (or - online - nothing was marked) is expected
+    " on most runs, not an error.
+    IF sy-batch = abap_true.
+      MESSAGE s008(y0033icms).
+    ELSE.
+      MESSAGE e008(y0033icms).
+    ENDIF.
     RETURN.
   ENDIF.
 
@@ -423,7 +671,7 @@ FORM execute_reversal.
       INTO TABLE @lt_keep
       WHERE belnr_fi = @ls_any-belnr_fi
         AND gjahr_fi = @ls_any-gjahr_fi
-        AND status   = @gc_status-posted.
+        AND status = @gc_status-posted.
 
     " OBJ_SYS must be the full logical system name (e.g. QP2CLNT600),
     " confirmed against a real document header - SY-SYSID alone only
@@ -471,6 +719,13 @@ FORM execute_reversal.
     DATA lv_rev_obj_sys  TYPE bapiache09-obj_sys.
     DATA lt_rev_return   TYPE TABLE OF bapiret2.
 
+    " Same reasoning as POST_ONE_DOCUMENT - BKPF-TCODE otherwise
+    " records SE38 for this reversal document too.
+    DATA(lv_saved_tcode_rev) = sy-tcode.
+    IF gv_program_id IS NOT INITIAL.
+      sy-tcode = gv_program_id.
+    ENDIF.
+
     CALL FUNCTION 'BAPI_ACC_DOCUMENT_REV_POST'
       EXPORTING
         reversal        = ls_reversal
@@ -481,6 +736,8 @@ FORM execute_reversal.
         obj_sys         = lv_rev_obj_sys
       TABLES
         return          = lt_rev_return.
+
+    sy-tcode = lv_saved_tcode_rev. " restore immediately - never leak the fake value beyond this BAPI call
 
     READ TABLE lt_rev_return WITH KEY type = 'E' TRANSPORTING NO FIELDS.
     IF sy-subrc <> 0.
@@ -528,10 +785,24 @@ FORM execute_reversal.
                                   reversal_exec_date  = @sy-datum,
                                   reversal_exec_time  = @sy-uzeit,
                                   reversal_belnr      = @lv_reversal_belnr,
-                                  reversal_gjahr      = @ls_any-gjahr_fi
+                                  reversal_gjahr      = @ls_any-gjahr_fi,
+                                  msg                 = @space
         WHERE docnum = @ls_req-docnum AND itmnum = @ls_req-itmnum AND seqnr = @ls_req-seqnr.
+      " Same reasoning as POST_ONE_DOCUMENT: clears any MSG left over
+      " from an earlier failed reversal attempt on this same item - now
+      " that this cycle succeeded, it shouldn't still look like it has
+      " a pending error. Full history stays in Y0033FI_ICM_LOG.
 
       ls_req-reversal_belnr = lv_reversal_belnr.
+      " WRITE_LOG's BELNR column always logs LS_ITEM-BELNR_FI (see
+      " WRITE_LOG) - overwritten here with the new reversal document
+      " instead of the original posted one, so this specific REVERSED
+      " log row shows the document this transition actually produced
+      " (same convention as POST_ONE_DOCUMENT logging the newly posted
+      " document, not some prior reference). The original document is
+      " still the one this whole loop is about and stays visible on
+      " every earlier log row for this item (POSTED, etc.).
+      ls_req-belnr_fi = lv_reversal_belnr.
       DATA lv_msg_reversed TYPE char200.
       lv_msg_reversed = |Reversed via { lv_reversal_belnr } (trigger { ls_req-reversal_trigger })|.
       PERFORM write_log USING ls_req gc_action-reversed gc_status-reversal_requested gc_status-reversed
@@ -554,6 +825,29 @@ FORM execute_reversal.
     ENDIF.
 
   ENDLOOP.
+
+  " Summary message - same reasoning as POST_RELEASED_ITEMS: re-read
+  " the items this run started with (LT_STRQ) and see where each one
+  " landed, since the reversal/re-post logic above updates
+  " Y0033FI_ICM_ITEM directly, per group, not back into this table.
+  DATA lv_reversed_ok   TYPE i.
+  DATA lv_reversed_fail TYPE i.
+  LOOP AT lt_strq INTO DATA(ls_rev_result).
+    SELECT SINGLE status FROM y0033fi_icm_item
+      INTO @DATA(lv_rev_result_status)
+      WHERE docnum = @ls_rev_result-docnum AND itmnum = @ls_rev_result-itmnum AND seqnr = @ls_rev_result-seqnr.
+    IF lv_rev_result_status = gc_status-reversed.
+      lv_reversed_ok = lv_reversed_ok + 1.
+    ELSE.
+      lv_reversed_fail = lv_reversed_fail + 1.
+    ENDIF.
+  ENDLOOP.
+
+  IF lv_reversed_fail > 0.
+    MESSAGE s023(y0033icms) WITH lv_reversed_ok lv_reversed_fail DISPLAY LIKE 'E'.
+  ELSE.
+    MESSAGE s023(y0033icms) WITH lv_reversed_ok lv_reversed_fail.
+  ENDIF.
 
 ENDFORM.
 
@@ -600,6 +894,8 @@ FORM build_lane_fieldcat.
   add_lane_field 'COUNTRY'       'Country'      8   'X'.
   add_lane_field 'PLANT_CODE'    'Plant Code'   12  'X'.
   add_lane_field 'PLANT_REGION'  'Plant UF'     10  'X'.
+  add_lane_field 'TRANSFER_CFOP'   'Transfer CFOP'   10 'X'.
+  add_lane_field 'TRANSFER_BRANCH' 'Transfer Branch' 4  'X'.
   add_lane_field 'ORIGIN_REGION' 'Origin UF'    10  'X'.
   add_lane_field 'DEST_REGION'   'Dest. UF'     10  'X'.
   add_lane_field 'ACTIVE'        'Active'       6   'X'.
@@ -615,7 +911,7 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 *&      Form  CALC_MATCH_LEVEL
 *&---------------------------------------------------------------------*
-* MATCH_LEVEL = how many of the 7 key fields are non-blank. Called
+* MATCH_LEVEL = how many of the 9 key fields are non-blank. Called
 * automatically on save - never entered by hand (see FORM
 * BUILD_LANE_FIELDCAT, field is not editable in the grid).
 *---------------------------------------------------------------------*
@@ -623,13 +919,15 @@ FORM calc_match_level USING ps_lane TYPE y0033fi_icm_lane
                     CHANGING pc_level TYPE n.
 
   DATA lv_count TYPE i.
-  IF ps_lane-bukrs         IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
-  IF ps_lane-vendor_code   IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
-  IF ps_lane-vendor_tax_id IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
-  IF ps_lane-vendor_region IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
-  IF ps_lane-country       IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
-  IF ps_lane-plant_code    IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
-  IF ps_lane-plant_region  IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
+  IF ps_lane-bukrs           IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
+  IF ps_lane-vendor_code     IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
+  IF ps_lane-vendor_tax_id   IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
+  IF ps_lane-vendor_region   IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
+  IF ps_lane-country         IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
+  IF ps_lane-plant_code      IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
+  IF ps_lane-plant_region    IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
+  IF ps_lane-transfer_cfop   IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
+  IF ps_lane-transfer_branch IS NOT INITIAL. lv_count = lv_count + 1. ENDIF.
 
   pc_level = lv_count.
 

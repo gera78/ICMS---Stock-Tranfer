@@ -8,7 +8,8 @@
 
 TYPE-POOLS: icon.  " ICON_LED_GREEN and friends, used by BUILD_STATUS_ICONS in Y0033FI_ICMS_F01
 
-TABLES: j_1bnfdoc.
+TABLES: j_1bnfdoc,
+        y0033fi_icm_edoc.  " needed only so S_ACCKEY (screens USR/ADM) can do SELECT-OPTIONS ... FOR y0033fi_icm_edoc-accesskey
 
 *&---------------------------------------------------------------------*
 *& Constants
@@ -55,33 +56,97 @@ CONSTANTS:
 * TODO (Q2-c): confirm whether these should be used as an additional/
 * alternative cancellation signal alongside J_1BNFDOC-CANCEL.
 
-* STATUS domain (see CR16002_DDIC_SPEC.md) - long, self-explanatory
-* values by design (development team is English-speaking).
+* STATUS domain - domain Y0033FI_ICM_STATUS_N (SE11), NUMC(3). Gaps
+* between values (multiples of 10) leave room to insert a new status
+* later without renumbering; 900+ is reserved for statuses that are
+* never persisted, and 990 for ERROR (can occur at any point in the
+* flow, not a step in it).
+* 000 is deliberately UNUSED here - it's the technical initial value
+* of a NUMC(3) field, so a real status coded as 000 is indistinguishable
+* from "never set" (SE16N hides it, IS INITIAL wrongly matches it).
+* 000 is reserved to mean "not set".
 CONSTANTS:
   BEGIN OF gc_status,
-    ready_to_save      TYPE char20 VALUE 'READY_TO_SAVE', " in-memory only, never persisted - see CALCULATE_CREDIT/SAVE_CANDIDATES
-    candidate          TYPE char20 VALUE 'CANDIDATE',
-    approved           TYPE char20 VALUE 'APPROVED',
-    posting            TYPE char20 VALUE 'POSTING',
-    posted             TYPE char20 VALUE 'POSTED',
-    cancel_detected    TYPE char20 VALUE 'CANCEL_DETECTED',
-    reversal_requested TYPE char20 VALUE 'REVERSAL_REQUESTED',
-    reversed           TYPE char20 VALUE 'REVERSED',
-    error              TYPE char20 VALUE 'ERROR',
-    not_candidate      TYPE char20 VALUE 'NOT_CANDIDATE', " in-memory only, never persisted - item found and calculated fine, but has no ICMS value or no credit, so it's not a real candidate
+    candidate          TYPE y0033fi_icm_status_n VALUE '010',
+    rejected           TYPE y0033fi_icm_status_n VALUE '015', " candidate rejected by user before approval - terminal, but treated like REVERSED by FILTER_ACTIVE_CYCLE so the nota/item can become a fresh candidate again in a future search
+    approved           TYPE y0033fi_icm_status_n VALUE '020',
+    post_failed        TYPE y0033fi_icm_status_n VALUE '025', " approved, POST_ONE_DOCUMENT attempted and failed (any reason - see MSG) - treated as a retry candidate, same as APPROVED, by POST_RELEASED_ITEMS
+* CANCELLED_PRE_POST: approved/post_failed, but J_1BNFDOC-CANCEL was
+* already set when POST_RELEASED_ITEMS went to post it - skipped,
+* never reaches GL. Terminal, like REJECTED/REVERSED (exempted the
+* same way in FILTER_ACTIVE_CYCLE/SAVE_CANDIDATES), so a corrected
+* nota can become a fresh candidate again later.
+    cancelled_pre_post TYPE y0033fi_icm_status_n VALUE '045',
+    posting            TYPE y0033fi_icm_status_n VALUE '030',
+    posted             TYPE y0033fi_icm_status_n VALUE '040',
+    cancel_detected    TYPE y0033fi_icm_status_n VALUE '050',
+    reversal_requested TYPE y0033fi_icm_status_n VALUE '060',
+    reversed           TYPE y0033fi_icm_status_n VALUE '070',
+    ready_to_save      TYPE y0033fi_icm_status_n VALUE '900', " in-memory only, never persisted - see CALCULATE_CREDIT/SAVE_CANDIDATES
+    not_candidate      TYPE y0033fi_icm_status_n VALUE '910', " in-memory only, never persisted - item found and calculated fine, but has no ICMS value or no credit, so it's not a real candidate
+    error              TYPE y0033fi_icm_status_n VALUE '990',
   END OF gc_status.
+
+* TEMPORARY TEST SWITCHES - while the two candidate-search models
+* (SELECT_CANDIDATE_DOCUMENTS, eDocument-driven/DIRECT=1, vs
+* SELECT_TRANSFER_CANDIDATES, J_1BNFDOC DIRECT=2 direct) are
+* being validated side by side, flip either flag here to isolate one
+* from the other during a search - both default to active, which is
+* today's behavior (additive, both run). Once the model is decided,
+* delete these variables together with whichever PERFORM call(s) they
+* guard, in both Y0033FI_ICM_STOCK_TRANSFER and _ADM.
+* NOTE: Y0033FI_ICM_STOCK_TRANSFER_ADM no longer reads these two flags -
+* it has its own P_MODE1/P_MODE2 checkboxes on the selection screen now
+* (Y0033FI_ICMS_SCR_ADM), for the same purpose, kept independently
+* testable from the admin UI. Y0033FI_ICM_STOCK_TRANSFER (user cockpit)
+* still reads these DATA flags directly.
+DATA:
+  gc_enable_search_edoc     TYPE abap_bool VALUE abap_true,
+  gc_enable_search_transfer TYPE abap_bool VALUE abap_true.
+
+* TEMPORARY SWITCH (TODO Q16): the accounting reference fields built in
+* POST_ONE_DOCUMENT (BAPIACGL09-ALLOC_NMBR/ITEM_TEXT) always use
+* LS_IT-DOCNUM today, which is the DESTINATION nota fiscal's document
+* number for items found via SELECT_CANDIDATE_DOCUMENTS (DIRECT=1).
+* Flip this to use the ORIGIN nota fiscal's document number instead
+* (J_1BNFDOC DIRECT=2, same NFENUM+SERIES+BUKRS) - see
+* RESOLVE_REF_DOCNUM in Y0033FI_ICMS_F02. No DDIC change: resolved at
+* posting time only, never persisted. Defaults to today's behavior
+* (destination) until FI confirms which one they actually want on the
+* accounting document.
+DATA gv_use_orig_docnum_ref TYPE abap_bool VALUE abap_false.
+
+* TEMPORARY SWITCH, same concept/reasoning as GV_USE_ORIG_DOCNUM_REF
+* above: BAPIACGL09-PLANT (see POST_ONE_DOCUMENT) always uses
+* LS_IT-WERKS_DEST today, the DESTINATION plant. Flip this to use the
+* ORIGIN nota fiscal's plant instead (its own BRANCH, from the
+* DIRECT=2 J_1BNFDOC counterpart, resolved to WERKS via T001W-
+* J_1BBRANCH - see RESOLVE_REF_WERKS in Y0033FI_ICMS_F02). No DDIC
+* change: resolved at posting time only, never persisted. Defaults to
+* today's behavior (destination) until FI confirms which one they
+* actually want on the accounting document.
+DATA gv_use_orig_werks_ref TYPE abap_bool VALUE abap_true.
+
+* NOTE: the intercompany-transfer flow's origin branch and CFOP are
+* NOT constants/config fields anymore - they're read straight out of
+* Y0033FI_ICM_LANE (TRANSFER_BRANCH / TRANSFER_CFOP) by
+* SELECT_TRANSFER_CANDIDATES, same table that already decides
+* eligibility and benefit % for this flow. See that FORM's header
+* comment (Y0033FI_ICMS_F01) and TY_LANE_KEY above.
 
 * LOG-ACTION domain
 CONSTANTS:
   BEGIN OF gc_action,
     candidate_saved    TYPE char20 VALUE 'CANDIDATE_SAVED',
     candidate_deleted  TYPE char20 VALUE 'CANDIDATE_DELETED',
+    candidate_rejected TYPE char20 VALUE 'CANDIDATE_REJECTED',
     approved           TYPE char20 VALUE 'APPROVED',
     posting_started    TYPE char20 VALUE 'POSTING_STARTED',
     posted             TYPE char20 VALUE 'POSTED',
     cancel_detected    TYPE char20 VALUE 'CANCEL_DETECTED',
     reversal_requested TYPE char20 VALUE 'REVERSAL_REQUESTED',
     reversed           TYPE char20 VALUE 'REVERSED',
+    cancelled_pre_post TYPE char20 VALUE 'CANCELLED_PRE_POST',
     error              TYPE char20 VALUE 'ERROR',
     period_fallback    TYPE char20 VALUE 'PERIOD_FALLBACK',
     bapi_detail        TYPE char20 VALUE 'BAPI_DETAIL', " supplementary BAPI message, not a real transition - STATUS_FROM = STATUS_TO
@@ -102,16 +167,17 @@ CONSTANTS:
     link_error TYPE char20 VALUE 'LINK_ERROR',
   END OF gc_edoc_status.
 
-* Screen filter domain (user/admin cockpit selection) - short codes
-* are fine here, this is a screen parameter, never persisted.
-CONSTANTS:
-  BEGIN OF gc_filter,
-    all       TYPE char1 VALUE 'A',
-    attention TYPE char1 VALUE 'T',
-    new_cand  TYPE char1 VALUE 'N',
-    processed TYPE char1 VALUE 'P',
-    clean     TYPE char1 VALUE 'C',  " candidates only, no ERROR items
-  END OF gc_filter.
+* CR16002 status filter checkboxes - replaced the old single-choice
+* GC_FILTER categories (All/Needs attention/.../Clean). See FORM
+* GET_STATUS_FILTER_SEARCH/GET_STATUS_FILTER_VIEW/APPLY_STATUS_FILTER
+* in Y0033FI_ICMS_F01. TY_R_STATUS is a plain SELECT-OPTIONS-style
+* range table so it works both for LOOP/DELETE on GIT_ITEM (in-memory)
+* and, if ever needed, directly in a WHERE against the DB.
+TYPES ty_r_status TYPE RANGE OF y0033fi_icm_status_n.
+
+* Used by FORM PAD_NFENUM_RANGE (Y0033FI_ICMS_F01) to zero-pad S_NFENUM
+* before filtering, in both search and view mode.
+TYPES ty_r_nfenum TYPE RANGE OF j_1bnfdoc-nfenum.
 
 *&---------------------------------------------------------------------*
 *& Types
@@ -119,7 +185,19 @@ CONSTANTS:
 TYPES:
   BEGIN OF ty_item,
     sel          TYPE c LENGTH 1,        " ALV row selection checkbox
+    " DOCNUM: the candidate's own identity key (DOCNUM+ITMNUM+SEQNR) -
+    " destination (DIRECT=1) when found by SELECT_CANDIDATE_DOCUMENTS,
+    " origin (DIRECT=2) when found by SELECT_TRANSFER_CANDIDATES;
+    " unchanged meaning, do not repurpose.
     docnum       TYPE j_1bnfdoc-docnum,
+    " DOCNUM_ORIG/DOCNUM_DEST: origin (DIRECT=2)/destination (DIRECT=1)
+    " DOCNUM for this same NFENUM+SERIES+BUKRS, filled by both
+    " SELECT_CANDIDATE_DOCUMENTS and SELECT_TRANSFER_CANDIDATES when
+    " exactly one counterpart exists; blank if not (yet) found. NOT YET
+    " PERSISTED - requires matching fields on Y0033FI_ICM_ITEM (DDIC
+    " change, not done here).
+    docnum_orig  TYPE j_1bnfdoc-docnum,
+    docnum_dest  TYPE j_1bnfdoc-docnum,
     itmnum       TYPE j_1bnflin-itmnum,
     seqnr        TYPE n LENGTH 3,
     nfenum       TYPE j_1bnfdoc-nfenum,
@@ -135,13 +213,13 @@ TYPES:
     werks_orig   TYPE werks_d,           " not currently populated - no confirmed source field
     werks_dest   TYPE werks_d,           " from EDOBRINCOMING-PLANT
     edoc_guid    TYPE char32,            " eDocument GUID used as source for this cycle (fixed evidence)
-    accesskey    TYPE char44,            " NF-e access key, cross-check evidence only
     materialdoc  TYPE char10,            " informative only, not used for matching
     materialdoc_year TYPE n LENGTH 4,    " informative only, not used for matching
     matnr        TYPE j_1bnflin-matnr,
     matorg       TYPE j_1bnflin-matorg,
     mwskz        TYPE j_1bnflin-mwskz,  " tax code, per item - may be blank
     prctr        TYPE j_1bnflin-prctr,  " profit center, per item - may be blank
+    cfop         TYPE j_1bnflin-cfop,   " item's own CFOP - not saved until now, see READ_ITEMS_AND_ICMS
     menge        TYPE j_1bnflin-menge,
     menge_unit   TYPE meins,           " unit of measure - reference field for MENGE (QUAN type)
     netwr        TYPE j_1bnflin-netwr,
@@ -160,7 +238,10 @@ TYPES:
     kmein        TYPE konp-kmein,
     credit_amount  TYPE j_1bnfstx-taxval,
     waers        TYPE waers,
-    status       TYPE char20,
+    status       TYPE y0033fi_icm_status_n,
+    line_ok      TYPE char1, " pipeline-internal marker only (SELECT_CANDIDATE_DOCUMENTS...CALCULATE_CREDIT) -
+                              " never a real STATUS value, so it can't live in the (now numeric) STATUS field;
+                              " 'X' = ICMS line read fine, still pending the benefit % lookup
     cre_user     TYPE syuname,
     cre_date     TYPE dats,
     cre_time     TYPE tims,
@@ -173,6 +254,14 @@ TYPES:
     bldat_fi     TYPE bldat,
     budat_fi     TYPE budat,
     period_fallback TYPE char1,
+    " When POST_ONE_DOCUMENT actually ran (system date/time), same
+    " pattern as APR_DATE/APR_TIME/APR_USER - NOT the same thing as
+    " BLDAT_FI/BUDAT_FI above, which are accounting dates (the nota
+    " fiscal's own date, or today only on the period-closed fallback),
+    " not necessarily the real moment the posting happened.
+    pst_user     TYPE syuname,
+    pst_date     TYPE dats,
+    pst_time     TYPE tims,
     canc_det_date TYPE dats,
     canc_det_time TYPE tims,
     canc_det_user TYPE syuname,
@@ -188,7 +277,8 @@ TYPES:
     id_exec       TYPE char20,
     msg           TYPE char200,
     status_icon   TYPE icon_d,       " traffic-light icon for STATUS - see BUILD_STATUS_ICONS
-    color_tab     TYPE lvc_t_scol,  " per-cell font color (Benefit %/ICMS Credit) - see BUILD_COLOR_TAB
+    status_descr  TYPE char40,       " "<code> - <description>", shown next to STATUS_ICON - see BUILD_STATUS_DESCR
+    color_tab     TYPE lvc_t_scol,  " per-cell background color - NFe Date/Number/Item/DocNum cells, alternated per nota fiscal, see BUILD_NOTA_COLOR
     celltab       TYPE lvc_t_styl,  " per-cell style: disables every
                                      " column except SEL, so the grid
                                      " doesn't look editable everywhere
@@ -232,7 +322,21 @@ TYPES:
     country       TYPE land1,
     plant_code    TYPE werks_d,
     plant_region  TYPE t005u-bland,
+    transfer_cfop   TYPE char10,          " 8th match field, blank = wildcard like the other 7 - CFOP identifying the intercompany transfer flow (blank for the eDocument-driven flow, which never sets it)
+* 9th match field - origin branch for the intercompany transfer flow.
+* A DEDICATED field, NOT VENDOR_CODE: VENDOR_CODE is CHAR10 (still
+* needed as-is for the real-vendor flow) and BRANCH is CHAR4 - reusing
+* VENDOR_CODE for both caused a real ALPHA/zero-pad conversion bug
+* ("0006" saved/read back as "0000").
+    transfer_branch TYPE j_1bnfdoc-branch,
   END OF ty_lane_key.
+
+* Used by FORM MATCH_LANE (Y0033FI_ICMS_F01) - the caller
+* (SELECT_CANDIDATE_DOCUMENTS) reads Y0033FI_ICM_LANE once into this
+* type and passes it in, instead of MATCH_LANE re-reading the table on
+* every call (it used to, once per candidate row - one of the main
+* causes of a slow search with many eDocuments).
+TYPES ty_it_lane TYPE STANDARD TABLE OF y0033fi_icm_lane WITH DEFAULT KEY.
 
 *&---------------------------------------------------------------------*
 *& Global data (shared)
@@ -246,8 +350,9 @@ DATA:
   go_cc      TYPE REF TO cl_gui_custom_container,
   gv_id_exec TYPE char20,
   gv_waers   TYPE waers,
-  gv_filt    TYPE char1,  " derived from the P_FALL/P_FATT/P_FNEW/P_FPROC
-                           " radio buttons - see FORM GET_SCREEN_FILTER
+  gr_status_filt TYPE ty_r_status,  " status codes checked on the filter
+                           " checkboxes - see FORM GET_STATUS_FILTER_SEARCH/
+                           " GET_STATUS_FILTER_VIEW/APPLY_STATUS_FILTER
   gv_ucomm   TYPE sy-ucomm.  " shared by every MODULE ... INPUT - MODULE
                               " blocks do not have their own local DATA
                               " scope like FORM does, so this must be
@@ -269,6 +374,28 @@ DATA:
   gt_fcat_param TYPE lvc_t_fcat,
   go_alv_param  TYPE REF TO cl_gui_alv_grid,
   go_cc_param   TYPE REF TO cl_gui_custom_container.
+
+* View Log popup (screen-less, CL_SALV_TABLE) - see Y0033FI_ICMS_F01
+* FORM SHOW_LOG_POPUP and CLASS LCL_LOG_EVENTS below. GT_LOG_DISP is
+* global (not a FORM-local table) purely so LCL_LOG_EVENTS can read the
+* clicked row back by index, same reasoning as GIT_ITEM/LCL_ALV_EVENTS.
+TYPES:
+  BEGIN OF ty_log_disp,
+    seqnr       TYPE n LENGTH 3,
+    itmnum      TYPE j_1bnflin-itmnum,
+    action      TYPE char20,
+    lognr       TYPE n LENGTH 6,
+    status_from TYPE char40,
+    status_to   TYPE char40,
+    bukrs       TYPE bukrs,  " not displayed - only needed to open FB03 with the right company code
+    belnr       TYPE belnr_d,
+    gjahr       TYPE gjahr,
+    message     TYPE char200,
+    act_user    TYPE syuname,
+    act_date    TYPE dats,
+    act_time    TYPE tims,
+  END OF ty_log_disp.
+DATA gt_log_disp TYPE STANDARD TABLE OF ty_log_disp WITH DEFAULT KEY.
 
 *&---------------------------------------------------------------------*
 *& Class LCL_ALV_EVENTS - hotspot click handler (shared)
@@ -348,6 +475,17 @@ CLASS lcl_alv_events IMPLEMENTATION.
         SET PARAMETER ID 'GJR' FIELD gwa_item-gjahr_fi.
         CALL TRANSACTION 'FB03' AND SKIP FIRST SCREEN.
 
+      WHEN 'REVERSAL_BELNR'.
+        " Same FB03 pattern as BELNR_FI above, but for the reversal
+        " document (REVERSAL_GJAHR - the original document's own fiscal
+        " year, see EXECUTE_REVERSAL/Y0033FI_ICMS_F02 - a reversal always
+        " posts in the same fiscal year as what it reverses).
+        CHECK gwa_item-reversal_belnr IS NOT INITIAL.
+        SET PARAMETER ID 'BUK' FIELD gwa_item-bukrs.
+        SET PARAMETER ID 'BLN' FIELD gwa_item-reversal_belnr.
+        SET PARAMETER ID 'GJR' FIELD gwa_item-reversal_gjahr.
+        CALL TRANSACTION 'FB03' AND SKIP FIRST SCREEN.
+
       WHEN 'EDOC_GUID'.
         CHECK gwa_item-edoc_guid IS NOT INITIAL.
         " Confirmed pattern, reused from an existing program in this
@@ -370,6 +508,40 @@ CLASS lcl_alv_events IMPLEMENTATION.
           AND RETURN.
 
     ENDCASE.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+*&---------------------------------------------------------------------*
+*& Class LCL_LOG_EVENTS - link-click handler for the View Log popup
+*&---------------------------------------------------------------------*
+*& CL_SALV_TABLE (SHOW_LOG_POPUP, Y0033FI_ICMS_F01) has its own event
+*& model (CL_SALV_EVENTS_TABLE/LINK_CLICK), separate from
+*& CL_GUI_ALV_GRID's HOTSPOT_CLICK handled by LCL_ALV_EVENTS above -
+*& hence a second, dedicated class. Reads GT_LOG_DISP (populated by
+*& SHOW_LOG_POPUP) back by row index, same pattern as LCL_ALV_EVENTS
+*& reading GIT_ITEM.
+*&---------------------------------------------------------------------*
+CLASS lcl_log_events DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS on_link_click
+      FOR EVENT link_click OF cl_salv_events_table
+      IMPORTING row column.
+ENDCLASS.
+
+CLASS lcl_log_events IMPLEMENTATION.
+
+  METHOD on_link_click.
+
+    CHECK column = 'BELNR'.
+    READ TABLE gt_log_disp INTO DATA(ls_log_disp) INDEX row.
+    CHECK sy-subrc = 0 AND ls_log_disp-belnr IS NOT INITIAL.
+
+    SET PARAMETER ID 'BUK' FIELD ls_log_disp-bukrs.
+    SET PARAMETER ID 'BLN' FIELD ls_log_disp-belnr.
+    SET PARAMETER ID 'GJR' FIELD ls_log_disp-gjahr.
+    CALL TRANSACTION 'FB03' AND SKIP FIRST SCREEN.
 
   ENDMETHOD.
 

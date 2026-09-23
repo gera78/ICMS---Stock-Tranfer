@@ -8,19 +8,47 @@
 *&---------------------------------------------------------------------*
 
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
-PARAMETERS:
-  p_bukrs TYPE bukrs OBLIGATORY.
+* Not OBLIGATORY - that flag validates on every PAI round trip, which
+* fires just from clicking a mode radio button (P_MNEW has
+* USER-COMMAND) and gets in the way of navigating the screen before
+* the user is done. Checked manually below instead, only when the
+* user actually presses Execute (SY-UCOMM = 'ONLI').
+  PARAMETERS:
+    p_bukrs TYPE bukrs DEFAULT '0033'.
 * Ship-from/ship-to are no longer fixed screen parameters - eligibility
 * and direction now come entirely from Y0033FI_ICM_LANE (see FORM
 * MATCH_LANE / SELECT_CANDIDATE_DOCUMENTS in Y0033FI_ICMS_F01).
-SELECT-OPTIONS:
-  s_datum  FOR sy-datum,
-  s_nfenum FOR j_1bnfdoc-nfenum,
+  SELECT-OPTIONS:
+    s_datum  FOR sy-datum,                        " eDocument creation date
+    s_nfenum FOR j_1bnfdoc-nfenum,                " NFe number - zero-padded automatically, see SELECT_CANDIDATE_DOCUMENTS
+    s_docnum FOR j_1bnfdoc-docnum,                " internal nota fiscal document number
+    s_series FOR j_1bnfdoc-series,                " NFe series
+    s_docdat FOR j_1bnfdoc-docdat MODIF ID fs,    " nota fiscal creation date - search mode only (view mode already filters this via S_DATUM, see REFRESH_FROM_DB)
+    s_acckey FOR y0033fi_icm_edoc-accesskey,      " NF-e access key (44 digits) - typed against Y0033FI_ICM_EDOC-ACCESSKEY (CHAR44), not the source table directly: EDOBRINCOMING-ACCESSKEY is TYPE STRING, which selection-screen fields can't use
 * S_LCTO only applies in view mode - nothing is posted yet in search
 * mode, so it is hidden there (same MODIF ID FV as the status filter).
-  s_lcto   FOR sy-datum MODIF ID fv.
+    s_lcto   FOR sy-datum MODIF ID fv,
 * TODO (Q5/Q8): reference date for selection still pending - uses
 * nota fiscal issue date for now.
+* Action Date - view mode only (same MODIF ID FV). Distinct from
+* S_DATUM (eDocument creation date) and S_LCTO (BUDAT_FI, the posting
+* accounting date, which is not reliable for "posted on date X": it
+* can be backdated and gets forced to today by the period-closed retry
+* in POST_RELEASED_ITEMS). Filters by when a lifecycle transition
+* actually happened, per Y0033FI_ICM_LOG-ACT_DATE - the only place
+* REJECTED has a date at all, since Y0033FI_ICM_ITEM has no field for it.
+    s_actdat FOR sy-datum MODIF ID fv.
+  PARAMETERS:
+    p_asav TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv, " Action: Candidate Saved
+    p_aapr TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv, " Action: Approved
+    p_arej TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv, " Action: Rejected
+    p_apst TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv. " Action: Posted
+
+*PARAMETERS:
+*  p_mode1 TYPE char1 RADIOBUTTON GROUP mode DEFAULT 'X' MODIF ID sel,
+*  p_mode2 TYPE char1 RADIOBUTTON GROUP mode MODIF ID sel.
+
+
 SELECTION-SCREEN END OF BLOCK b1.
 
 SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-b02.
@@ -28,29 +56,218 @@ SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-b02.
 * (without it, AT SELECTION-SCREEN OUTPUT only reruns on the next
 * Enter/round trip, so the filter block below would not hide/show
 * right away).
-PARAMETERS:
-  p_mnew  RADIOBUTTON GROUP mod DEFAULT 'X' USER-COMMAND mod_chg,   " search new candidates
-  p_mview RADIOBUTTON GROUP mod.               " view my candidates
+  PARAMETERS:
+    p_mnew  RADIOBUTTON GROUP mod DEFAULT 'X' USER-COMMAND mod_chg,   " search new candidates
+    p_mview RADIOBUTTON GROUP mod.               " view my candidates
 SELECTION-SCREEN END OF BLOCK b2.
 
-SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE TEXT-b03.
-* Filter (view mode only) - single choice, one radio button per option.
-* Selection text of each field is the label shown next to its button.
-PARAMETERS:
-  p_fall  RADIOBUTTON GROUP filt MODIF ID fv,               " All
-  p_fatt  RADIOBUTTON GROUP filt DEFAULT 'X' MODIF ID fv,    " Needs attention (default)
-  p_fnew  RADIOBUTTON GROUP filt MODIF ID fv,                " New candidates only
-  p_fproc RADIOBUTTON GROUP filt MODIF ID fv,                " Processed (Approved/Posted/Reversed)
-  p_fclean RADIOBUTTON GROUP filt MODIF ID fv.               " Candidates only, no ERROR items
-SELECTION-SCREEN END OF BLOCK b3.
+SELECTION-SCREEN BEGIN OF BLOCK b3a WITH FRAME TITLE TEXT-b3a.
+* Status filter for "Search New Candidates" - every status a fresh
+* search can produce, before anything is saved. All checked by
+* default. Label (icon + "<code> - <description>") is set in code
+* below (INITIALIZATION), not via Selection Texts - same icons/text
+* as BUILD_STATUS_ICONS/BUILD_STATUS_DESCR (Y0033FI_ICMS_F01), so the
+* filter looks consistent with the grid. Applied in
+* GET_STATUS_FILTER_SEARCH/APPLY_STATUS_FILTER (Y0033FI_ICMS_F01),
+* right after the search pipeline builds GIT_ITEM.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_sre TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fs.
+    SELECTION-SCREEN COMMENT 4(4) c_sre_ic MODIF ID fs.
+    SELECTION-SCREEN COMMENT 9(35) c_sre_tx MODIF ID fs.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_snc TYPE char1 AS CHECKBOX MODIF ID fs.
+    SELECTION-SCREEN COMMENT 4(4) c_snc_ic MODIF ID fs.
+    SELECTION-SCREEN COMMENT 9(35) c_snc_tx MODIF ID fs.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_ser TYPE char1 AS CHECKBOX MODIF ID fs.
+    SELECTION-SCREEN COMMENT 4(4) c_ser_ic MODIF ID fs.
+    SELECTION-SCREEN COMMENT 9(35) c_ser_tx MODIF ID fs.
+  SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN END OF BLOCK b3a.
+
+SELECTION-SCREEN BEGIN OF BLOCK b3b WITH FRAME TITLE TEXT-b3b.
+* Status filter for "View My Candidates" - every status a saved item
+* can be in. All checked by default. Same icon+label approach as B3A.
+*
+* Three "master" checkboxes group-toggle what a regular user actually
+* acts on from this screen (Approve/Delete/Reject/Request Reversal -
+* see Y0033FI_ICMS_SCR_100): needs my action (010/050), reversal
+* candidates (040), and everything else (waiting on admin, or already
+* closed out). USER-COMMAND forces an immediate refresh so the
+* children update right away - see AT SELECTION-SCREEN below. The 11
+* real filter checkboxes below stay in a fixed position either way -
+* this is just a quick way to mark/unmark a group. All three are also
+* reset to their default state whenever the mode switches to View (see
+* MOD_CHG below), not just at screen startup.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_mvg1 TYPE char1 AS CHECKBOX DEFAULT 'X' USER-COMMAND mvg1 MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(60) c_mvg1 MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_mvg3 TYPE char1 AS CHECKBOX DEFAULT 'X' USER-COMMAND mvg3 MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(60) c_mvg3 MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_mvg2 TYPE char1 AS CHECKBOX USER-COMMAND mvg2 MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(60) c_mvg2 MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN ULINE /1(79) MODIF ID fv.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_vca TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(4) c_vca_ic MODIF ID fv.
+    SELECTION-SCREEN COMMENT 9(35) c_vca_tx MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_vrj TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(4) c_vrj_ic MODIF ID fv.
+    SELECTION-SCREEN COMMENT 9(35) c_vrj_tx MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_vap TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(4) c_vap_ic MODIF ID fv.
+    SELECTION-SCREEN COMMENT 9(35) c_vap_tx MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_vpf TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(4) c_vpf_ic MODIF ID fv.
+    SELECTION-SCREEN COMMENT 9(35) c_vpf_tx MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_vpg TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(4) c_vpg_ic MODIF ID fv.
+    SELECTION-SCREEN COMMENT 9(35) c_vpg_tx MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_vpo TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(4) c_vpo_ic MODIF ID fv.
+    SELECTION-SCREEN COMMENT 9(35) c_vpo_tx MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_vcb TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(4) c_vcb_ic MODIF ID fv.
+    SELECTION-SCREEN COMMENT 9(35) c_vcb_tx MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_vcd TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(4) c_vcd_ic MODIF ID fv.
+    SELECTION-SCREEN COMMENT 9(35) c_vcd_tx MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_vrr TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(4) c_vrr_ic MODIF ID fv.
+    SELECTION-SCREEN COMMENT 9(35) c_vrr_tx MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_vrv TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(4) c_vrv_ic MODIF ID fv.
+    SELECTION-SCREEN COMMENT 9(35) c_vrv_tx MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS p_ver TYPE char1 AS CHECKBOX DEFAULT 'X' MODIF ID fv.
+    SELECTION-SCREEN COMMENT 4(4) c_ver_ic MODIF ID fv.
+    SELECTION-SCREEN COMMENT 9(35) c_ver_tx MODIF ID fv.
+  SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN END OF BLOCK b3b.
 
 INITIALIZATION.
   gv_id_exec = sy-uname && sy-datum && sy-uzeit.
 
+* Filter checkbox icons + "<code> - <description>" labels - same
+* icons/codes as BUILD_STATUS_ICONS/BUILD_STATUS_DESCR (Y0033FI_ICMS_F01).
+  c_sre_ic = icon_system_play.      c_sre_tx = '900 - Ready to Save'.
+  c_snc_ic = icon_led_inactive.     c_snc_tx = '910 - Not a Candidate'.
+  c_ser_ic = icon_message_error.    c_ser_tx = '990 - Error'.
+
+  c_vca_ic = icon_led_yellow.       c_vca_tx = '010 - Candidate'.
+  c_vrj_ic = icon_led_inactive.     c_vrj_tx = '015 - Rejected'.
+  c_vap_ic = icon_checked.          c_vap_tx = '020 - Approved'.
+  c_vpf_ic = icon_message_warning.  c_vpf_tx = '025 - Post Failed'.
+  c_vcb_ic = icon_cancel.           c_vcb_tx = '045 - Cancelled Before Posting'.
+  c_vpg_ic = icon_locked.           c_vpg_tx = '030 - Posting'.
+  c_vpo_ic = icon_led_green.        c_vpo_tx = '040 - Posted'.
+  c_vcd_ic = icon_alert.            c_vcd_tx = '050 - Cancel Detected'.
+  c_vrr_ic = icon_history.          c_vrr_tx = '060 - Reversal Requested'.
+  c_vrv_ic = icon_led_red.          c_vrv_tx = '070 - Reversed'.
+  c_ver_ic = icon_message_error.    c_ver_tx = '990 - Error'.
+
+  c_mvg1 = 'Needs my action (010, 050)'.
+  c_mvg3 = 'Posted ( To be Reversal (040))'.
+  c_mvg2 = 'Others (015, 020, 025, 045, 030, 060, 070, 990)'.
+
 AT SELECTION-SCREEN OUTPUT.
   LOOP AT SCREEN.
-    IF screen-group1 = 'FV' AND p_mnew = 'X'.
-      screen-active = 0.  " hide entirely - filter doesn't apply when searching new candidates
+    IF screen-group1 = 'FS' AND p_mnew <> 'X'.
+      screen-active = 0.  " hide entirely - only applies when searching new candidates
+      MODIFY SCREEN.
+    ENDIF.
+    IF screen-group1 = 'FV' AND p_mview <> 'X'.
+      screen-active = 0.  " hide entirely - only applies to view mode
       MODIFY SCREEN.
     ENDIF.
   ENDLOOP.
+
+*  LOOP AT SCREEN.
+*    IF screen-group1 = 'sel'.
+*      screen-invisible = 1.
+*      MODIFY SCREEN.
+*    ENDIF.
+*  ENDLOOP.
+
+AT SELECTION-SCREEN.
+* ONLI = the user pressed Execute (F8), not just clicked a radio
+* button/checkbox - only THEN is P_BUKRS actually required (and its
+* authorization worth checking).
+  IF sy-ucomm = 'ONLI'.
+    IF p_bukrs IS INITIAL.
+      MESSAGE 'Enter a Company Code' TYPE 'E'.
+    ENDIF.
+    PERFORM check_bukrs_authority USING p_bukrs.
+    IF p_mnew = 'X'.
+      PERFORM check_search_filters.
+    ENDIF.
+  ENDIF.
+
+* Mode just switched (MOD_CHG fires for any change within the P_MNEW/
+* P_MVIEW radio group, not only when P_MNEW itself is clicked) - reset
+* each mode's own status filter to its defined default, exactly as if
+* the screen were opened fresh in that mode. This intentionally
+* overwrites any manual per-checkbox tweak made before switching away.
+  IF sy-ucomm = 'MOD_CHG'.
+    IF p_mnew = 'X'.
+      p_sre = abap_true.  p_snc = abap_false.  p_ser = abap_false.
+    ELSEIF p_mview = 'X'.
+      p_vca = abap_true.   p_vcd = abap_true.                    " needs my action (010, 050)
+      p_vpo = abap_false.                                        " reversal (040) - off by default
+      p_vrj = abap_false.  p_vap = abap_false.  p_vpf = abap_false.  p_vcb = abap_false.
+      p_vpg = abap_false.  p_vrr = abap_false.  p_vrv = abap_false.  p_ver = abap_false. " others
+    ENDIF.
+  ENDIF.
+
+* "Master" checkboxes (B3B) - group-toggle the real filter checkboxes
+* when clicked. See the block comment above P_MVG1 for what each
+* group covers.
+  CASE sy-ucomm.
+    WHEN 'MVG1'.
+      p_vca = p_mvg1.  p_vcd = p_mvg1.
+    WHEN 'MVG3'.
+      p_vpo = p_mvg3.
+    WHEN 'MVG2'.
+      p_vrj = p_mvg2.  p_vap = p_mvg2.  p_vpf = p_mvg2.  p_vcb = p_mvg2.  p_vpg = p_mvg2.
+      p_vrr = p_mvg2.  p_vrv = p_mvg2.  p_ver = p_mvg2.
+  ENDCASE.
+
+* Keep the master checkboxes honest: recompute them from their actual
+* children on EVERY round trip (not just when the master itself was
+* clicked) - otherwise switching between Search/View (or any other
+* trip to the server, e.g. pressing Execute) kept showing whichever
+* value the master had last, even after a child was unchecked
+* individually, instead of tracking its children's real combined state.
+  p_mvg1 = COND #( WHEN p_vca = abap_true AND p_vcd = abap_true
+                    THEN abap_true ELSE abap_false ).
+  p_mvg3 = COND #( WHEN p_vpo = abap_true THEN abap_true ELSE abap_false ).
+  p_mvg2 = COND #( WHEN p_vrj = abap_true AND p_vap = abap_true AND p_vpf = abap_true AND p_vcb = abap_true
+                         AND p_vpg = abap_true AND p_vrr = abap_true AND p_vrv = abap_true
+                         AND p_ver = abap_true
+                    THEN abap_true ELSE abap_false ).
