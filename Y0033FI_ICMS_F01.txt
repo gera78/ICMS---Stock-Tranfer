@@ -320,7 +320,16 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     WHERE edoc_type   = @gv_edoc_type
       AND proc_status IN ( @gc_edoc_proc_status-completed_ok,
                             @gc_edoc_proc_status-completed_man )
-      AND create_date IN @s_datum.
+      AND ( create_date IN @s_datum OR change_date IN @s_datum ).
+  " S_DATUM matches CREATE_DATE OR CHANGE_DATE: an eDocument is often
+  " created on one day and only reaches COMP_OK/COMP_MAN (the status
+  " this SELECT requires) on a later day - a daily job running with
+  " S_DATUM = today would otherwise never see it: on the creation day
+  " it isn't completed yet, and on the day it completes its
+  " CREATE_DATE is already in the past. CHANGE_DATE catches it on the
+  " day it changes. Items already in an active cycle are dropped
+  " later by FILTER_ACTIVE_CYCLE, so an eDocument matched again on a
+  " later change never produces a duplicate candidate.
   " Field names confirmed against SE11: EDOC_GUID (key), EDOC_TYPE,
   " PROC_STATUS, CREATE_DATE. PROCESS is still assumed, not yet
   " exercised by a real test - flag if it also errors out.
@@ -2264,39 +2273,86 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
       AND edoc_guid  IN @lr_guid_acckey
       AND budat_fi   IN @s_lcto.
 
-  " S_DATUM = eDocument creation date (EDOCUMENT-CREATE_DATE), same
-  " meaning as in search mode - checked against the eDocument this item
-  " was actually created from (the persisted EDOC_GUID, BEFORE it gets
-  " replaced below by the latest known GUID for display). Items with no
-  " eDocument at all (stock-transfer model, SELECT_TRANSFER_CANDIDATES,
-  " saves EDOC_GUID blank) can't match an eDocument date, so they are
-  " dropped too - same as in search mode, where that model returns
-  " nothing when S_DATUM is filled.
+  " S_DATUM = eDocument date, same meaning as in search mode: the
+  " eDocument's CREATE_DATE or CHANGE_DATE falls in the range (see
+  " SELECT_CANDIDATE_DOCUMENTS for why CHANGE_DATE counts too).
+  "
+  " An item matches when ANY eDocument known for its nota fiscal
+  " matches - not only the one persisted on the item (EDOC_GUID, the
+  " eDocument it was created from). The grid shows the LATEST known
+  " eDocument of the nota (see GET_LATEST_EDOC_GUID below), which may
+  " be a different one - checking only the persisted GUID made an item
+  " disappear when the user filtered by the date of the eDocument they
+  " were actually looking at on screen.
+  "
+  " Items with no eDocument at all (stock-transfer model, which saves
+  " EDOC_GUID blank and may have no Y0033FI_ICM_EDOC link either) can't
+  " match an eDocument date and are dropped - same as in search mode,
+  " where that model returns nothing when S_DATUM is filled.
   IF s_datum[] IS NOT INITIAL AND lt_db IS NOT INITIAL.
+    TYPES: BEGIN OF ty_edoc_link,
+             edoc_guid TYPE edocument-edoc_guid,
+             docnum    TYPE j_1bnfdoc-docnum,
+           END OF ty_edoc_link.
+    DATA lt_edoc_link TYPE STANDARD TABLE OF ty_edoc_link WITH DEFAULT KEY.
+
+    " 1) eDocument persisted on each item
+    LOOP AT lt_db INTO DATA(ls_db_guid) WHERE edoc_guid IS NOT INITIAL.
+      APPEND VALUE #( edoc_guid = ls_db_guid-edoc_guid docnum = ls_db_guid-docnum ) TO lt_edoc_link.
+    ENDLOOP.
+
+    " 2) every other eDocument linked to the same nota fiscal
+    TYPES: BEGIN OF ty_docnum_key,
+             docnum TYPE j_1bnfdoc-docnum,
+           END OF ty_docnum_key.
+    DATA lt_docnum_key TYPE STANDARD TABLE OF ty_docnum_key WITH DEFAULT KEY.
+    LOOP AT lt_db INTO ls_db_guid.
+      APPEND VALUE #( docnum = ls_db_guid-docnum ) TO lt_docnum_key.
+    ENDLOOP.
+    SORT lt_docnum_key BY docnum.
+    DELETE ADJACENT DUPLICATES FROM lt_docnum_key COMPARING docnum.
+
+    SELECT edoc_guid, docnum FROM y0033fi_icm_edoc
+      INTO TABLE @DATA(lt_edoc_linked)
+      FOR ALL ENTRIES IN @lt_docnum_key
+      WHERE docnum = @lt_docnum_key-docnum
+        AND status <> @gc_edoc_status-link_error.
+    LOOP AT lt_edoc_linked INTO DATA(ls_edoc_linked).
+      APPEND VALUE #( edoc_guid = ls_edoc_linked-edoc_guid docnum = ls_edoc_linked-docnum ) TO lt_edoc_link.
+    ENDLOOP.
+    SORT lt_edoc_link BY edoc_guid docnum.
+    DELETE ADJACENT DUPLICATES FROM lt_edoc_link COMPARING edoc_guid docnum.
+
+    " 3) which of those eDocuments are in the S_DATUM range
     TYPES: BEGIN OF ty_edoc_key,
              edoc_guid TYPE edocument-edoc_guid,
            END OF ty_edoc_key.
-    DATA lt_edoc_key TYPE STANDARD TABLE OF ty_edoc_key WITH DEFAULT KEY.
-    LOOP AT lt_db INTO DATA(ls_db_guid) WHERE edoc_guid IS NOT INITIAL.
-      APPEND VALUE #( edoc_guid = ls_db_guid-edoc_guid ) TO lt_edoc_key.
-    ENDLOOP.
-    SORT lt_edoc_key BY edoc_guid.
-    DELETE ADJACENT DUPLICATES FROM lt_edoc_key COMPARING edoc_guid.
-
     DATA lt_edoc_in_range TYPE STANDARD TABLE OF ty_edoc_key WITH DEFAULT KEY.
-    IF lt_edoc_key IS NOT INITIAL.
+    IF lt_edoc_link IS NOT INITIAL.
       SELECT edoc_guid FROM edocument
         INTO TABLE @lt_edoc_in_range
-        FOR ALL ENTRIES IN @lt_edoc_key
-        WHERE edoc_guid   = @lt_edoc_key-edoc_guid
-          AND create_date IN @s_datum.
+        FOR ALL ENTRIES IN @lt_edoc_link
+        WHERE edoc_guid = @lt_edoc_link-edoc_guid
+          AND ( create_date IN @s_datum OR change_date IN @s_datum ).
       SORT lt_edoc_in_range BY edoc_guid.
     ENDIF.
 
-    LOOP AT lt_db INTO ls_db_guid.
+    " 4) nota fiscal numbers with at least one eDocument in range
+    DATA lt_docnum_in_range TYPE STANDARD TABLE OF j_1bnfdoc-docnum WITH DEFAULT KEY.
+    LOOP AT lt_edoc_link INTO DATA(ls_edoc_link).
       READ TABLE lt_edoc_in_range TRANSPORTING NO FIELDS BINARY SEARCH
-        WITH KEY edoc_guid = ls_db_guid-edoc_guid.
-      IF ls_db_guid-edoc_guid IS INITIAL OR sy-subrc <> 0.
+        WITH KEY edoc_guid = ls_edoc_link-edoc_guid.
+      IF sy-subrc = 0.
+        APPEND ls_edoc_link-docnum TO lt_docnum_in_range.
+      ENDIF.
+    ENDLOOP.
+    SORT lt_docnum_in_range BY table_line.
+    DELETE ADJACENT DUPLICATES FROM lt_docnum_in_range COMPARING table_line.
+
+    LOOP AT lt_db INTO ls_db_guid.
+      READ TABLE lt_docnum_in_range TRANSPORTING NO FIELDS BINARY SEARCH
+        WITH KEY table_line = ls_db_guid-docnum.
+      IF sy-subrc <> 0.
         DELETE lt_db.
       ENDIF.
     ENDLOOP.

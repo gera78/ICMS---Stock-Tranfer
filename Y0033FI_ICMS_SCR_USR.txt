@@ -20,14 +20,15 @@ SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
 * MATCH_LANE / SELECT_CANDIDATE_DOCUMENTS in Y0033FI_ICMS_F01).
   SELECT-OPTIONS:
 * Date filters - each one means the same thing in every mode:
-*   S_DATUM  = eDocument creation date (EDOCUMENT-CREATE_DATE). Strict:
+*   S_DATUM  = eDocument date: EDOCUMENT-CREATE_DATE OR CHANGE_DATE in
+*              range (in view mode: of any eDocument of the nota). Strict:
 *              items with no eDocument (stock-transfer search model)
 *              never match it, so none of them come back when it's filled.
 *   S_DOCDAT = nota fiscal date (J_1BNFDOC-DOCDAT / ITEM-DOCDAT).
 *   S_LCTO   = posting date of the accounting document (BUDAT_FI) -
 *              view mode only.
 *   S_ACTDAT = date an action happened (Y0033FI_ICM_LOG) - view mode only.
-    s_datum  FOR sy-datum,                        " eDocument creation date
+    s_datum  FOR sy-datum,                        " eDocument date (created or changed)
     s_nfenum FOR j_1bnfdoc-nfenum,                " NFe number - zero-padded automatically, see SELECT_CANDIDATE_DOCUMENTS
     s_docnum FOR j_1bnfdoc-docnum,                " internal nota fiscal document number
     s_series FOR j_1bnfdoc-series,                " NFe series
