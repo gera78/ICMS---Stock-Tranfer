@@ -47,19 +47,15 @@ ENDFORM.
 * own already-bounded Y0033FI_ICM_ITEM data, not the company-wide
 * eDocument tables.
 *
-* PU_EDOC_MODEL = is the eDocument-driven search model
-* (SELECT_CANDIDATE_DOCUMENTS) part of this run? S_DATUM (eDocument
-* creation date) and S_ACCKEY (NF-e access key) only narrow THAT model -
-* the stock-transfer model (SELECT_TRANSFER_CANDIDATES) reads J_1BNFDOC
-* directly and ignores both - so they only count as "a filter" when
-* the eDocument model actually runs. Otherwise a run with only the
-* transfer model and only S_DATUM filled would pass this check and
-* still read the whole company history, unbounded.
+* Every filter below bounds BOTH search models: S_DATUM/S_ACCKEY are
+* eDocument filters, and when either is filled the stock-transfer
+* model (which has no eDocument) returns nothing - see
+* SELECT_TRANSFER_CANDIDATES.
 *---------------------------------------------------------------------*
-FORM check_search_filters USING pu_edoc_model TYPE abap_bool.
+FORM check_search_filters.
 
   DATA lv_ok TYPE abap_bool.
-  PERFORM has_search_filters USING pu_edoc_model CHANGING lv_ok.
+  PERFORM has_search_filters CHANGING lv_ok.
   IF lv_ok = abap_false.
     MESSAGE 'Fill in at least one filter besides Company Code' TYPE 'E'.
   ENDIF.
@@ -73,17 +69,11 @@ ENDFORM.
 * callers that must not stop the run (AUTO_APPROVE_CANDIDATES in a
 * background job, see Y0033FI_ICMS_F02).
 *---------------------------------------------------------------------*
-FORM has_search_filters USING    pu_edoc_model TYPE abap_bool
-                        CHANGING pc_ok         TYPE abap_bool.
+FORM has_search_filters CHANGING pc_ok TYPE abap_bool.
 
-  pc_ok = abap_false.
-  IF s_nfenum[] IS NOT INITIAL OR s_docnum[] IS NOT INITIAL
-     OR s_series[] IS NOT INITIAL OR s_docdat[] IS NOT INITIAL.
-    pc_ok = abap_true.
-  ELSEIF pu_edoc_model = abap_true
-     AND ( s_datum[] IS NOT INITIAL OR s_acckey[] IS NOT INITIAL ).
-    pc_ok = abap_true.
-  ENDIF.
+  pc_ok = xsdbool( s_datum[]  IS NOT INITIAL OR s_nfenum[] IS NOT INITIAL
+                OR s_docnum[] IS NOT INITIAL OR s_series[] IS NOT INITIAL
+                OR s_docdat[] IS NOT INITIAL OR s_acckey[] IS NOT INITIAL ).
 
 ENDFORM.
 
@@ -601,6 +591,16 @@ ENDFORM.
 *                   (J_1BNFDOC-REGIO is the BR partner's own region)
 *---------------------------------------------------------------------*
 FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
+
+  " S_DATUM (eDocument creation date) and S_ACCKEY (NF-e access key of
+  " the eDocument) are eDocument filters - this model has no eDocument
+  " at all, so nothing it finds can match them. Filled = this model
+  " returns nothing, instead of silently ignoring them and returning
+  " every transfer nota of the company (a user-cockpit search with only
+  " S_DATUM filled once returned ~69k items this way).
+  IF s_datum[] IS NOT INITIAL OR s_acckey[] IS NOT INITIAL.
+    RETURN.
+  ENDIF.
 
   DATA lt_lane_all TYPE ty_it_lane.
   SELECT * FROM y0033fi_icm_lane
@@ -2269,8 +2269,9 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
   " was actually created from (the persisted EDOC_GUID, BEFORE it gets
   " replaced below by the latest known GUID for display). Items with no
   " eDocument at all (stock-transfer model, SELECT_TRANSFER_CANDIDATES,
-  " saves EDOC_GUID blank) are not restricted by it - same as in search
-  " mode, where that model ignores S_DATUM too.
+  " saves EDOC_GUID blank) can't match an eDocument date, so they are
+  " dropped too - same as in search mode, where that model returns
+  " nothing when S_DATUM is filled.
   IF s_datum[] IS NOT INITIAL AND lt_db IS NOT INITIAL.
     TYPES: BEGIN OF ty_edoc_key,
              edoc_guid TYPE edocument-edoc_guid,
@@ -2292,10 +2293,10 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
       SORT lt_edoc_in_range BY edoc_guid.
     ENDIF.
 
-    LOOP AT lt_db INTO ls_db_guid WHERE edoc_guid IS NOT INITIAL.
+    LOOP AT lt_db INTO ls_db_guid.
       READ TABLE lt_edoc_in_range TRANSPORTING NO FIELDS BINARY SEARCH
         WITH KEY edoc_guid = ls_db_guid-edoc_guid.
-      IF sy-subrc <> 0.
+      IF ls_db_guid-edoc_guid IS INITIAL OR sy-subrc <> 0.
         DELETE lt_db.
       ENDIF.
     ENDLOOP.
