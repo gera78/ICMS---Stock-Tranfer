@@ -8,6 +8,100 @@
 *&---------------------------------------------------------------------*
 
 *&---------------------------------------------------------------------*
+*&      Form  AUTO_APPROVE_CANDIDATES
+*&---------------------------------------------------------------------*
+* Admin run with P_AUTO (Auto Approved) checked. Runs the same search
+* chain as "Search New Candidates" and persists every row that comes
+* out as READY_TO_SAVE directly as AUTO_APPROVED - i.e. the manual
+* Save (CANDIDATE) + Approve (APPROVED) steps done in one go, with
+* no user selection. Same safety checks as SAVE_CANDIDATES (lock +
+* active-cycle re-check + next SEQNR), and one log row per item,
+* written the same way as the manual flow. POST_RELEASED_ITEMS then
+* picks AUTO_APPROVED up exactly like APPROVED.
+*
+* GIT_ITEM is used as the work table for the search chain and is
+* cleared at the end, so the mode selected on screen starts clean.
+*---------------------------------------------------------------------*
+FORM auto_approve_candidates USING pu_bukrs   TYPE bukrs
+                                   pu_id_exec TYPE char20.
+
+  CLEAR git_item.
+  PERFORM select_candidate_documents USING pu_bukrs.
+  PERFORM read_items_and_icms.
+  PERFORM determine_benefit_percentage.
+  PERFORM filter_active_cycle.
+  PERFORM calculate_credit.
+  PERFORM flag_not_candidates.
+
+  DATA lt_ready TYPE ty_it_item.
+  LOOP AT git_item INTO DATA(ls_cand) WHERE status = gc_status-ready_to_save.
+    APPEND ls_cand TO lt_ready.
+  ENDLOOP.
+  CLEAR git_item.
+
+  DATA lv_saved TYPE i.
+  DATA lv_skip  TYPE i.
+
+  LOOP AT lt_ready INTO DATA(ls_sel).
+    DATA lv_subrc TYPE sy-subrc.
+    PERFORM enqueue_item USING ls_sel-docnum ls_sel-itmnum 0 CHANGING lv_subrc.
+    IF lv_subrc <> 0.
+      lv_skip = lv_skip + 1.
+      CONTINUE.
+    ENDIF.
+
+    " Same race protection as SAVE_CANDIDATES - another session may
+    " have saved this item since FILTER_ACTIVE_CYCLE ran.
+    SELECT COUNT(*) FROM y0033fi_icm_item
+      INTO @DATA(lv_active_count)
+      WHERE docnum = @ls_sel-docnum
+        AND itmnum = @ls_sel-itmnum
+        AND status <> @gc_status-reversed.
+    IF lv_active_count > 0.
+      lv_skip = lv_skip + 1.
+      PERFORM dequeue_item USING ls_sel-docnum ls_sel-itmnum 0.
+      CONTINUE.
+    ENDIF.
+
+    DATA lv_seqnr TYPE n LENGTH 3.
+    PERFORM next_seqnr USING ls_sel-docnum ls_sel-itmnum CHANGING lv_seqnr.
+    ls_sel-seqnr    = lv_seqnr.
+    ls_sel-status   = gc_status-auto_approved.
+    ls_sel-cre_user = sy-uname.
+    ls_sel-cre_date = sy-datum.
+    ls_sel-cre_time = sy-uzeit.
+    ls_sel-apr_user = sy-uname.
+    ls_sel-apr_date = sy-datum.
+    ls_sel-apr_time = sy-uzeit.
+    ls_sel-id_exec  = pu_id_exec.
+
+    INSERT y0033fi_icm_item FROM @( CORRESPONDING y0033fi_icm_item( ls_sel ) ).
+    IF sy-subrc = 0.
+      PERFORM write_log USING ls_sel gc_action-auto_approved space gc_status-auto_approved
+                               'Candidate auto-approved by admin run'.
+      IF ls_sel-edoc_guid IS NOT INITIAL.
+        UPDATE y0033fi_icm_edoc SET seqnr = ls_sel-seqnr
+          WHERE docnum = ls_sel-docnum AND edoc_guid = ls_sel-edoc_guid.
+      ENDIF.
+      lv_saved = lv_saved + 1.
+    ELSE.
+      lv_skip = lv_skip + 1.
+    ENDIF.
+
+    PERFORM dequeue_item USING ls_sel-docnum ls_sel-itmnum lv_seqnr.
+  ENDLOOP.
+
+  COMMIT WORK AND WAIT.
+
+  IF sy-batch = abap_true.
+    WRITE: / 'Auto Approved:', lv_saved, 'item(s) - skipped:', lv_skip.
+  ELSE.
+    MESSAGE s010(y0033icms) WITH lv_saved lv_skip.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  POST_RELEASED_ITEMS
 *&---------------------------------------------------------------------*
 * One accounting document per nota fiscal (DOCNUM), as agreed - not
@@ -28,9 +122,12 @@ FORM post_released_items.
 
   CONSTANTS lc_max_pairs TYPE i VALUE 499.  " 999 / 2 lines per document
 
+  " AUTO_APPROVED (set by AUTO_APPROVE_CANDIDATES) is posted exactly
+  " like a manually APPROVED item.
   SELECT * FROM y0033fi_icm_item
     INTO TABLE @DATA(lt_approved)
-    WHERE status = @gc_status-approved.
+    WHERE status = @gc_status-approved
+       OR status = @gc_status-auto_approved.
 
   IF lt_approved IS INITIAL.
     MESSAGE e007(y0033icms).
@@ -285,11 +382,18 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
     " returned is logged as BAPI_DETAIL below, with STATUS_FROM =
     " STATUS_TO, since it's supplementary detail about the SAME
     " failure, not a separate transition.
+    " AUTO_APPROVED items go back to AUTO_APPROVED (PU_CHUNK still
+    " carries the status read before the POSTING lock), everything
+    " else to APPROVED - so the audit trail keeps the approval origin.
+    DATA lv_back_status TYPE char20.
     LOOP AT pu_chunk INTO ls_it.
-      UPDATE y0033fi_icm_item SET status = @gc_status-approved,
+      lv_back_status = COND #( WHEN ls_it-status = gc_status-auto_approved
+                               THEN gc_status-auto_approved
+                               ELSE gc_status-approved ).
+      UPDATE y0033fi_icm_item SET status = @lv_back_status,
                                   msg    = @ls_err-message
         WHERE docnum = @ls_it-docnum AND itmnum = @ls_it-itmnum AND seqnr = @ls_it-seqnr.
-      PERFORM write_log USING ls_it gc_action-error gc_status-posting gc_status-approved
+      PERFORM write_log USING ls_it gc_action-error gc_status-posting lv_back_status
                                ls_err-message.
       PERFORM dequeue_item USING ls_it-docnum ls_it-itmnum ls_it-seqnr.
     ENDLOOP.
@@ -304,7 +408,10 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
       DATA(lv_ret_msg) = ls_ret_msg-message.
       PERFORM smart_case CHANGING lv_ret_msg.
       LOOP AT pu_chunk INTO ls_it.
-        PERFORM write_log USING ls_it gc_action-bapi_detail gc_status-approved gc_status-approved
+        lv_back_status = COND #( WHEN ls_it-status = gc_status-auto_approved
+                                 THEN gc_status-auto_approved
+                                 ELSE gc_status-approved ).
+        PERFORM write_log USING ls_it gc_action-bapi_detail lv_back_status lv_back_status
                                  lv_ret_msg.
       ENDLOOP.
     ENDLOOP.

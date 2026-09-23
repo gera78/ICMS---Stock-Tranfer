@@ -62,6 +62,7 @@ CONSTANTS:
     ready_to_save      TYPE char20 VALUE 'READY_TO_SAVE', " in-memory only, never persisted - see CALCULATE_CREDIT/SAVE_CANDIDATES
     candidate          TYPE char20 VALUE 'CANDIDATE',
     approved           TYPE char20 VALUE 'APPROVED',
+    auto_approved      TYPE char20 VALUE 'AUTO_APPROVED', " (021) saved + approved in one step by the admin run with P_AUTO set - see AUTO_APPROVE_CANDIDATES
     posting            TYPE char20 VALUE 'POSTING',
     posted             TYPE char20 VALUE 'POSTED',
     cancel_detected    TYPE char20 VALUE 'CANCEL_DETECTED',
@@ -77,6 +78,7 @@ CONSTANTS:
     candidate_saved    TYPE char20 VALUE 'CANDIDATE_SAVED',
     candidate_deleted  TYPE char20 VALUE 'CANDIDATE_DELETED',
     approved           TYPE char20 VALUE 'APPROVED',
+    auto_approved      TYPE char20 VALUE 'AUTO_APPROVED',
     posting_started    TYPE char20 VALUE 'POSTING_STARTED',
     posted             TYPE char20 VALUE 'POSTED',
     cancel_detected    TYPE char20 VALUE 'CANCEL_DETECTED',

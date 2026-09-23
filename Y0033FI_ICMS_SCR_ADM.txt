@@ -40,6 +40,15 @@ PARAMETERS:
   p_mlane RADIOBUTTON GROUP mod.                         " Maintain Corridors (screen 300)
 SELECTION-SCREEN END OF BLOCK b2.
 
+* Auto Approved - when checked, the admin run picks up every new
+* candidate found by the search chain (the same rows the user would
+* see as READY_TO_SAVE) and persists it directly as AUTO_APPROVED,
+* skipping the manual Save (CANDIDATE) + Approve (APPROVED) steps.
+* Runs before the selected mode, both interactively and in
+* background - see START-OF-SELECTION in the main program.
+PARAMETERS:
+  p_auto AS CHECKBOX DEFAULT space.                      " process Auto Approved
+
 SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE TEXT-b03.
 * Filter - applies to P_MVIEW and P_MADM (not P_MNEW, which searches
 * fresh candidates instead of filtering existing ones). Single choice,

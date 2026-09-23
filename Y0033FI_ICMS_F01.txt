@@ -779,7 +779,7 @@ FORM build_status_icons.
         gwa_item-status_icon = icon_led_inactive.       " not saved yet
       WHEN gc_status-candidate.
         gwa_item-status_icon = icon_led_yellow.          " waiting for user approval
-      WHEN gc_status-approved.
+      WHEN gc_status-approved OR gc_status-auto_approved.
         gwa_item-status_icon = icon_incomplete.          " waiting for admin to post
       WHEN gc_status-posting.
         gwa_item-status_icon = icon_locked.              " transient posting lock
@@ -1377,6 +1377,7 @@ FORM apply_screen_filter USING pu_filter TYPE char1.
       DELETE git_item WHERE status <> gc_status-candidate.
     WHEN gc_filter-processed.
       DELETE git_item WHERE status <> gc_status-approved
+                         AND status <> gc_status-auto_approved
                          AND status <> gc_status-posted
                          AND status <> gc_status-reversed.
     WHEN gc_filter-clean.
