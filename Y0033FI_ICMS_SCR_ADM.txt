@@ -18,7 +18,7 @@ SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
 * the user is done. Checked manually below instead, only when the
 * user actually presses Execute (SY-UCOMM = 'ONLI').
 PARAMETERS:
-  p_bukrs TYPE bukrs.
+  p_bukrs TYPE bukrs DEFAULT '0033'.
 SELECT-OPTIONS:
 * Date filters - each one means the same thing in every mode:
 *   S_DATUM  = eDocument date: EDOCUMENT-CREATE_DATE OR CHANGE_DATE in

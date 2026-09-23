@@ -645,6 +645,27 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
     ENDLOOP.
 
     COMMIT WORK AND WAIT.
+
+    " Immediate retry: as soon as the chunk becomes POST_FAILED (025),
+    " try again right now, in this same run (online or background)
+    " instead of waiting for the next execution. The retry is the same
+    " one the next run would do - BUDAT = today (see LV_IS_RETRY at the
+    " top of this FORM) - so it only makes sense when today's date was
+    " NOT the one that just failed; otherwise it would fail the same
+    " way. That also guarantees at most ONE extra attempt: the
+    " recursive call is itself a retry (BUDAT = today), so it never
+    " retries again. Log trail per item: POSTING -> POST_FAILED ->
+    " POSTING -> POSTED (or POST_FAILED again, with the new message).
+    IF lv_budat <> sy-datum.
+      DATA lt_retry TYPE y0033fi_icm_item_tt.
+      CLEAR lt_retry.
+      LOOP AT pu_chunk INTO ls_it.
+        ls_it-status = gc_status-post_failed.
+        ls_it-msg    = ls_err-message.
+        APPEND ls_it TO lt_retry.
+      ENDLOOP.
+      PERFORM post_one_document USING lt_retry.
+    ENDIF.
     RETURN.
   ENDIF.
 
