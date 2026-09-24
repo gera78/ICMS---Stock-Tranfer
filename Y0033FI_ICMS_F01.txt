@@ -180,16 +180,28 @@ FORM backfill_docnum_ref USING pu_bukrs TYPE bukrs.
     INTO TABLE @lt_blank
     WHERE bukrs = @pu_bukrs
       AND ( docnum_ref = @lv_ref_initial OR docnum_ref IS NULL ).
-  CHECK lt_blank IS NOT INITIAL.
 
-  CLEAR git_item.
-  LOOP AT lt_blank INTO DATA(ls_blank).
-    CLEAR gwa_item.
-    MOVE-CORRESPONDING ls_blank TO gwa_item.
-    APPEND gwa_item TO git_item.
-  ENDLOOP.
-  PERFORM fill_docnum_ref.
-  CLEAR git_item.
+  DATA lv_recovered TYPE i.
+  IF lt_blank IS NOT INITIAL.
+    CLEAR git_item.
+    LOOP AT lt_blank INTO DATA(ls_blank).
+      CLEAR gwa_item.
+      MOVE-CORRESPONDING ls_blank TO gwa_item.
+      APPEND gwa_item TO git_item.
+    ENDLOOP.
+    PERFORM fill_docnum_ref.
+    " Every row here was blank before - the ones filled now were just
+    " saved by FILL_DOCNUM_REF.
+    LOOP AT git_item TRANSPORTING NO FIELDS WHERE docnum_ref IS NOT INITIAL.
+      lv_recovered = lv_recovered + 1.
+    ENDLOOP.
+    CLEAR git_item.
+  ENDIF.
+
+  IF sy-batch = abap_true.
+    WRITE: / 'Counterpart DOCNUM recovery:', lines( lt_blank ), 'item(s) without it,',
+             lv_recovered, 'recovered'.
+  ENDIF.
 
 ENDFORM.
 
