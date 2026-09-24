@@ -1,0 +1,75 @@
+*&---------------------------------------------------------------------*
+*& Function group Y0033FI_ICMS_API - function modules
+*&---------------------------------------------------------------------*
+*& Three function modules, all thin wrappers around the FORMs in
+*& Y0033FI_ICMS_F03. Create them in SE37 in function group
+*& Y0033FI_ICMS_API with the interfaces below (all parameters pass by
+*& value is NOT required - default pass by reference is fine), then
+*& paste each body. Normally called through class
+*& Y0033CL_ICMS_STOCK_TRANSFER, not directly.
+*&---------------------------------------------------------------------*
+
+FUNCTION y0033fi_icms_auto_post.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     VALUE(IV_BUKRS) TYPE  BUKRS
+*"     VALUE(IV_DOCNUM) TYPE  J_1BDOCNUM
+*"  EXPORTING
+*"     VALUE(ET_ITEMS) TYPE  Y0033FI_ICM_ITEM_TT
+*"     VALUE(ET_RETURN) TYPE  BAPIRET2_T
+*"----------------------------------------------------------------------
+
+  PERFORM api_auto_post USING    iv_bukrs iv_docnum
+                        CHANGING et_items et_return.
+
+ENDFUNCTION.
+
+
+FUNCTION y0033fi_icms_get_posting_data.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     VALUE(IV_BUKRS) TYPE  BUKRS
+*"     VALUE(IV_DOCNUM) TYPE  J_1BDOCNUM
+*"     VALUE(IV_ITEMNO_OFFSET) TYPE  POSNR_ACC DEFAULT 0
+*"  EXPORTING
+*"     VALUE(ET_ACCOUNTGL) TYPE  BAPIACGL09_TAB
+*"     VALUE(ET_CURRENCYAMOUNT) TYPE  BAPIACCR09_TAB
+*"     VALUE(ET_ITEMS) TYPE  Y0033FI_ICM_ITEM_TT
+*"     VALUE(ET_RETURN) TYPE  BAPIRET2_T
+*"----------------------------------------------------------------------
+
+  DATA lt_gl  TYPE ty_it_acc_gl.
+  DATA lt_cur TYPE ty_it_acc_cur.
+
+  PERFORM api_get_posting_data USING    iv_bukrs iv_docnum iv_itemno_offset
+                               CHANGING lt_gl lt_cur et_items et_return.
+
+  et_accountgl      = lt_gl.
+  et_currencyamount = lt_cur.
+
+ENDFUNCTION.
+
+
+FUNCTION y0033fi_icms_confirm_posting.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     VALUE(IV_BUKRS) TYPE  BUKRS
+*"     VALUE(IV_DOCNUM) TYPE  J_1BDOCNUM
+*"     VALUE(IV_BELNR) TYPE  BELNR_D
+*"     VALUE(IV_GJAHR) TYPE  GJAHR
+*"     VALUE(IV_BUDAT) TYPE  BUDAT
+*"     VALUE(IV_BLDAT) TYPE  BLDAT
+*"     VALUE(IT_ITEMS) TYPE  Y0033FI_ICM_ITEM_TT
+*"     VALUE(IV_COMMIT) TYPE  ABAP_BOOL DEFAULT ABAP_FALSE
+*"  EXPORTING
+*"     VALUE(ET_RETURN) TYPE  BAPIRET2_T
+*"----------------------------------------------------------------------
+
+  PERFORM api_confirm_posting USING    iv_bukrs iv_docnum iv_belnr iv_gjahr
+                                       iv_budat iv_bldat it_items iv_commit
+                              CHANGING et_return.
+
+ENDFUNCTION.

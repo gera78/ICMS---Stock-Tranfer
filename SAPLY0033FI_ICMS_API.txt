@@ -1,0 +1,13 @@
+*&---------------------------------------------------------------------*
+*& Function group Y0033FI_ICMS_API - main program SAPLY0033FI_ICMS_API
+*&---------------------------------------------------------------------*
+*& System-generated includes (TOP and UXX) plus the report programs'
+*& shared FORM includes and the API FORMs (F03). Add the three
+*& INCLUDE lines below the generated ones.
+*&---------------------------------------------------------------------*
+  INCLUDE ly0033fi_icms_apitop.              " Global Declarations
+  INCLUDE ly0033fi_icms_apiuxx.              " Function Modules
+
+  INCLUDE y0033fi_icms_f01.                  " shared FORMs - search/save/log (same as the report programs)
+  INCLUDE y0033fi_icms_f02.                  " shared FORMs - posting/reversal (same as the admin program)
+  INCLUDE y0033fi_icms_f03.                  " API FORMs - single DOCNUM

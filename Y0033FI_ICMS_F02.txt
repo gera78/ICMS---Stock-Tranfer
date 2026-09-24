@@ -117,7 +117,9 @@ FORM auto_approve_candidates USING pu_bukrs   TYPE bukrs
 
   COMMIT WORK AND WAIT.
 
-  IF sy-batch = abap_true.
+  IF gv_api_mode = abap_true.
+    RETURN. " API: results go back through RETURN tables, no list/message output
+  ELSEIF sy-batch = abap_true.
     WRITE: / 'Auto Approved:', lv_saved, 'item(s) - skipped:', lv_skip.
   ELSE.
     MESSAGE s010(y0033icms) WITH lv_saved lv_skip.
@@ -143,8 +145,6 @@ ENDFORM.
 * ASSIGNMENT (ZUONR) as DOCNUM+ITMNUM below; confirm with FI.
 *---------------------------------------------------------------------*
 FORM post_released_items.
-
-  CONSTANTS lc_max_pairs TYPE i VALUE 499.  " 999 / 2 lines per document
 
   " AUTO_APPROVED (021, see AUTO_APPROVE_CANDIDATES) is posted exactly
   " like a manually APPROVED (020) item.
@@ -172,13 +172,72 @@ FORM post_released_items.
     ENDLOOP.
   ENDIF.
 
+  " Cancelled-nota check + one document per nota fiscal - shared with
+  " the single-DOCNUM API (API_AUTO_POST, Y0033FI_ICMS_F03), see
+  " POST_ITEM_LIST below. Items skipped as CANCELLED_PRE_POST are
+  " removed from LT_APPROVED, so the checks below only see what was
+  " actually sent to posting.
+  PERFORM post_item_list CHANGING lt_approved.
+
+  IF lt_approved IS INITIAL.
+    " Nothing to post is a normal, expected outcome (not every run has
+    " approved items, or - online - nothing was marked) - TYPE E would
+    " flag the background job as ended in error in SM37 even though
+    " nothing actually went wrong, so it is only used interactively.
+    IF sy-batch = abap_true.
+      MESSAGE s007(y0033icms).
+    ELSE.
+      MESSAGE e007(y0033icms).
+    ENDIF.
+    RETURN.
+  ENDIF.
+
+  " Summary message - POST_ONE_DOCUMENT never reports back to this FORM
+  " (it updates Y0033FI_ICM_ITEM directly, chunk by chunk), so the only
+  " reliable way to know the outcome is to re-read the same items this
+  " run started with and see where each one landed.
+  DATA lv_posted_ok   TYPE i.
+  DATA lv_posted_fail TYPE i.
+  LOOP AT lt_approved INTO DATA(ls_result).
+    SELECT SINGLE status FROM y0033fi_icm_item
+      INTO @DATA(lv_result_status)
+      WHERE docnum = @ls_result-docnum AND itmnum = @ls_result-itmnum AND seqnr = @ls_result-seqnr.
+    IF lv_result_status = gc_status-posted.
+      lv_posted_ok = lv_posted_ok + 1.
+    ELSE.
+      lv_posted_fail = lv_posted_fail + 1.
+    ENDIF.
+  ENDLOOP.
+
+  IF lv_posted_fail > 0.
+    MESSAGE s022(y0033icms) WITH lv_posted_ok lv_posted_fail DISPLAY LIKE 'E'.
+  ELSE.
+    MESSAGE s022(y0033icms) WITH lv_posted_ok lv_posted_fail.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  POST_ITEM_LIST
+*&---------------------------------------------------------------------*
+* Posts a list of APPROVED/AUTO_APPROVED/POST_FAILED items: skips (and
+* flags as CANCELLED_PRE_POST) those whose nota fiscal is already
+* cancelled, then posts one accounting document per nota fiscal, split
+* in chunks of up to LC_MAX_PAIRS items. Extracted unchanged from
+* POST_RELEASED_ITEMS so the single-DOCNUM API (Y0033FI_ICMS_F03) posts
+* exactly the same way. PC_ITEMS comes back without the cancelled ones.
+*---------------------------------------------------------------------*
+FORM post_item_list CHANGING pc_items TYPE y0033fi_icm_item_tt.
+
+  CONSTANTS lc_max_pairs TYPE i VALUE 499.  " 999 / 2 lines per document
+
   " Skip items whose nota fiscal was already cancelled (J_1BNFDOC-CANCEL)
   " by the time this run tries to post them - posting first and relying
   " on CHECK_NF_CANCELLATION/reversal to clean up afterward would create
   " a real FI document for a nota that's already void. Flagged with its
   " own status (CANCELLED_PRE_POST) instead, so these never reach GL and
   " the user can filter "victims of cancellation" before posting.
-  IF lt_approved IS NOT INITIAL.
+  IF pc_items IS NOT INITIAL.
     " Structured single-field driving table (not a bare elementary
     " itab) for FOR ALL ENTRIES - same workaround already used for
     " LT_NFE_KEYS in SELECT_CANDIDATE_DOCUMENTS (Y0033FI_ICMS_F01).
@@ -186,7 +245,7 @@ FORM post_released_items.
              docnum TYPE j_1bnfdoc-docnum,
            END OF ty_docnum_key.
     DATA lt_docnum_check TYPE STANDARD TABLE OF ty_docnum_key WITH DEFAULT KEY.
-    LOOP AT lt_approved INTO DATA(ls_appr_chk).
+    LOOP AT pc_items INTO DATA(ls_appr_chk).
       APPEND VALUE #( docnum = ls_appr_chk-docnum ) TO lt_docnum_check.
     ENDLOOP.
     SORT lt_docnum_check BY docnum.
@@ -201,7 +260,7 @@ FORM post_released_items.
     SORT lt_cancelled_docnum BY table_line.
 
     DATA lv_victims TYPE i.
-    LOOP AT lt_approved INTO DATA(ls_victim).
+    LOOP AT pc_items INTO DATA(ls_victim).
       READ TABLE lt_cancelled_docnum WITH KEY table_line = ls_victim-docnum
         TRANSPORTING NO FIELDS BINARY SEARCH.
       CHECK sy-subrc = 0.
@@ -226,7 +285,7 @@ FORM post_released_items.
       ENDIF.
 
       PERFORM dequeue_item USING ls_victim-docnum ls_victim-itmnum ls_victim-seqnr.
-      DELETE lt_approved.
+      DELETE pc_items.
     ENDLOOP.
 
     IF lv_victims > 0.
@@ -234,20 +293,9 @@ FORM post_released_items.
     ENDIF.
   ENDIF.
 
-  IF lt_approved IS INITIAL.
-    " Nothing to post is a normal, expected outcome (not every run has
-    " approved items, or - online - nothing was marked) - TYPE E would
-    " flag the background job as ended in error in SM37 even though
-    " nothing actually went wrong, so it is only used interactively.
-    IF sy-batch = abap_true.
-      MESSAGE s007(y0033icms).
-    ELSE.
-      MESSAGE e007(y0033icms).
-    ENDIF.
-    RETURN.
-  ENDIF.
+  CHECK pc_items IS NOT INITIAL.
 
-  SORT lt_approved BY docnum itmnum.
+  SORT pc_items BY docnum itmnum.
 
   " Distinct list of DOCNUMs to process. Deliberately classic/simple -
   " no LOOP...GROUP BY/REFERENCE INTO/LOOP AT GROUP - a real posting
@@ -257,7 +305,7 @@ FORM post_released_items.
   " cause, but it is newer and less battle-tested than a plain
   " READ TABLE/LOOP...WHERE, so it is not worth the risk here.
   DATA lt_docnums TYPE STANDARD TABLE OF j_1bdocnum WITH DEFAULT KEY.
-  LOOP AT lt_approved INTO DATA(ls_appr).
+  LOOP AT pc_items INTO DATA(ls_appr).
     READ TABLE lt_docnums WITH KEY table_line = ls_appr-docnum TRANSPORTING NO FIELDS.
     IF sy-subrc <> 0.
       APPEND ls_appr-docnum TO lt_docnums.
@@ -268,7 +316,7 @@ FORM post_released_items.
 
     DATA lt_group TYPE y0033fi_icm_item_tt.
     CLEAR lt_group.
-    LOOP AT lt_approved INTO DATA(ls_member) WHERE docnum = lv_docnum.
+    LOOP AT pc_items INTO DATA(ls_member) WHERE docnum = lv_docnum.
       APPEND ls_member TO lt_group.
     ENDLOOP.
 
@@ -301,28 +349,91 @@ FORM post_released_items.
 
   ENDLOOP.
 
-  " Summary message - POST_ONE_DOCUMENT never reports back to this FORM
-  " (it updates Y0033FI_ICM_ITEM directly, chunk by chunk), so the only
-  " reliable way to know the outcome is to re-read the same items this
-  " run started with and see where each one landed.
-  DATA lv_posted_ok   TYPE i.
-  DATA lv_posted_fail TYPE i.
-  LOOP AT lt_approved INTO DATA(ls_result).
-    SELECT SINGLE status FROM y0033fi_icm_item
-      INTO @DATA(lv_result_status)
-      WHERE docnum = @ls_result-docnum AND itmnum = @ls_result-itmnum AND seqnr = @ls_result-seqnr.
-    IF lv_result_status = gc_status-posted.
-      lv_posted_ok = lv_posted_ok + 1.
-    ELSE.
-      lv_posted_fail = lv_posted_fail + 1.
-    ENDIF.
-  ENDLOOP.
+ENDFORM.
 
-  IF lv_posted_fail > 0.
-    MESSAGE s022(y0033icms) WITH lv_posted_ok lv_posted_fail DISPLAY LIKE 'E'.
-  ELSE.
-    MESSAGE s022(y0033icms) WITH lv_posted_ok lv_posted_fail.
-  ENDIF.
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_POSTING_LINES
+*&---------------------------------------------------------------------*
+* One debit/credit pair per item (GL_DEBIT/GL_CREDIT from
+* Y0033FI_ICM_PARM, amount = CREDIT_AMOUNT). Extracted unchanged from
+* POST_ONE_DOCUMENT so the lines handed to another process by
+* GET_POSTING_DATA (Y0033FI_ICMS_F03) are exactly the ones this
+* program would post itself. PU_ITEMNO_OFFSET shifts ITEMNO_ACC so the
+* lines can be appended after the caller's own lines (0 = start at 1).
+* PC_BUZEI maps each item to its debit line's ITEMNO_ACC.
+*---------------------------------------------------------------------*
+FORM build_posting_lines USING    pu_chunk         TYPE y0033fi_icm_item_tt
+                                  pu_itemno_offset TYPE posnr_acc
+                         CHANGING pc_gl            TYPE ty_it_acc_gl
+                                  pc_cur           TYPE ty_it_acc_cur
+                                  pc_buzei         TYPE ty_it_buzei_map.
+
+  DATA: ls_gl     TYPE bapiacgl09,
+        ls_cur    TYPE bapiaccr09,
+        ls_buzei  TYPE ty_buzei_map,
+        lv_itemno TYPE posnr_acc.
+
+  CLEAR: pc_gl, pc_cur, pc_buzei.
+  lv_itemno = pu_itemno_offset.
+
+  LOOP AT pu_chunk INTO DATA(ls_it).
+    lv_itemno = lv_itemno + 1.
+
+    DATA lv_ref_docnum TYPE j_1bdocnum.
+    PERFORM resolve_ref_docnum USING ls_it CHANGING lv_ref_docnum.
+    DATA lv_ref_werks TYPE werks_d.
+    PERFORM resolve_ref_werks USING ls_it CHANGING lv_ref_werks.
+
+    CLEAR ls_gl.
+    ls_gl-itemno_acc = lv_itemno.
+    ls_gl-gl_account = gv_gl_debit.
+    ls_gl-comp_code  = ls_it-bukrs.
+    " Confirmed via a live field dump of this system's BAPIACGL09:
+    " the business place field here is called BUSINESSPLACE, not
+    " BUPLA (older SAP releases/discussions don't have this field
+    " at all on BAPIACGL09 - this release does).
+    ls_gl-businessplace = ls_it-branch.
+    " TAX_CODE removed - confirmed by a real test that this field
+    " makes the posting fail for this account (blank or not).
+    ls_gl-profit_ctr = ls_it-prctr.   " sourced from J_1BNFLIN-PRCTR - may be blank
+    ls_gl-material   = ls_it-matnr.
+    ls_gl-plant      = lv_ref_werks.  " TODO (Q16) - see RESOLVE_REF_WERKS
+    ls_gl-alloc_nmbr = |{ lv_ref_docnum }{ ls_it-itmnum }|.  " TODO (Q16) - see RESOLVE_REF_DOCNUM
+    ls_gl-item_text  = |ICMS benefit { lv_ref_docnum }/{ ls_it-itmnum }|.
+    APPEND ls_gl TO pc_gl.
+
+    CLEAR ls_cur.
+    ls_cur-itemno_acc = lv_itemno.
+    ls_cur-currency   = ls_it-waers.
+    ls_cur-amt_doccur = ls_it-credit_amount.
+    APPEND ls_cur TO pc_cur.
+
+    CLEAR ls_buzei.
+    ls_buzei-docnum = ls_it-docnum.
+    ls_buzei-itmnum = ls_it-itmnum.
+    ls_buzei-seqnr  = ls_it-seqnr.
+    ls_buzei-buzei  = lv_itemno.
+    APPEND ls_buzei TO pc_buzei.
+
+    lv_itemno = lv_itemno + 1.
+    CLEAR ls_gl.
+    ls_gl-itemno_acc = lv_itemno.
+    ls_gl-gl_account = gv_gl_credit.
+    ls_gl-comp_code  = ls_it-bukrs.
+    ls_gl-businessplace = ls_it-branch.
+    ls_gl-profit_ctr = ls_it-prctr.
+    ls_gl-material   = ls_it-matnr.
+    ls_gl-plant      = lv_ref_werks.  " TODO (Q16) - see RESOLVE_REF_WERKS
+    ls_gl-alloc_nmbr = |{ lv_ref_docnum }{ ls_it-itmnum }|.  " TODO (Q16) - see RESOLVE_REF_DOCNUM
+    ls_gl-item_text  = |ICMS benefit { lv_ref_docnum }/{ ls_it-itmnum }|.
+    APPEND ls_gl TO pc_gl.
+
+    CLEAR ls_cur.
+    ls_cur-itemno_acc = lv_itemno.
+    ls_cur-currency   = ls_it-waers.
+    ls_cur-amt_doccur = ls_it-credit_amount * -1.
+    APPEND ls_cur TO pc_cur.
+  ENDLOOP.
 
 ENDFORM.
 
@@ -414,12 +525,9 @@ ENDFORM.
 FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
 
   DATA: ls_header  TYPE bapiache09,
-        lt_gl      TYPE TABLE OF bapiacgl09,
-        ls_gl      TYPE bapiacgl09,
-        lt_cur     TYPE TABLE OF bapiaccr09,
-        ls_cur     TYPE bapiaccr09,
+        lt_gl      TYPE ty_it_acc_gl,
+        lt_cur     TYPE ty_it_acc_cur,
         lt_return  TYPE TABLE OF bapiret2,
-        lv_itemno  TYPE posnr_acc,
         lv_locked  TYPE abap_bool VALUE abap_true,
         ls_ok      TYPE bapiret2,
         lv_belnr   TYPE belnr_d,
@@ -431,13 +539,8 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
   " showed producing duplicated GL lines). Read back further down
   " when marking items POSTED, instead of relying on PU_CHUNK itself
   " carrying the value forward.
-  DATA: BEGIN OF ls_buzei,
-          docnum TYPE j_1bdocnum,
-          itmnum TYPE j_1bitmnum,
-          seqnr  TYPE y0033fi_icm_seq,
-          buzei  TYPE posnr_acc,
-        END OF ls_buzei.
-  DATA lt_buzei LIKE TABLE OF ls_buzei.
+  DATA ls_buzei TYPE ty_buzei_map.
+  DATA lt_buzei TYPE ty_it_buzei_map.
 
   " Lock and mark every item in the chunk as PSTG before posting, so a
   " parallel run cannot pick the same items up.
@@ -492,7 +595,6 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
 
   DO 2 TIMES.
     CLEAR: ls_header, lt_gl, lt_cur, lt_return, ls_err, lt_buzei.
-    lv_itemno = 0.
 
     ls_header-comp_code  = ls_any-bukrs.
     ls_header-doc_date   = lv_bldat.
@@ -506,65 +608,11 @@ FORM post_one_document USING pu_chunk TYPE y0033fi_icm_item_tt.
     " not our internal DOCNUM (J_1BDOCNUM).
     ls_header-ref_doc_no = |{ ls_any-nfenum }-{ ls_any-series }|.
 
-    LOOP AT pu_chunk INTO ls_it.
-      lv_itemno = lv_itemno + 1.
-
-      DATA lv_ref_docnum TYPE j_1bdocnum.
-      PERFORM resolve_ref_docnum USING ls_it CHANGING lv_ref_docnum.
-      DATA lv_ref_werks TYPE werks_d.
-      PERFORM resolve_ref_werks USING ls_it CHANGING lv_ref_werks.
-
-      CLEAR ls_gl.
-      ls_gl-itemno_acc = lv_itemno.
-      ls_gl-gl_account = gv_gl_debit.
-      ls_gl-comp_code  = ls_it-bukrs.
-      " Confirmed via a live field dump of this system's BAPIACGL09:
-      " the business place field here is called BUSINESSPLACE, not
-      " BUPLA (older SAP releases/discussions don't have this field
-      " at all on BAPIACGL09 - this release does).
-      ls_gl-businessplace = ls_it-branch.
-      " TAX_CODE removed - confirmed by a real test that this field
-      " makes the posting fail for this account (blank or not).
-      ls_gl-profit_ctr = ls_it-prctr.   " sourced from J_1BNFLIN-PRCTR - may be blank
-      ls_gl-material   = ls_it-matnr.
-      ls_gl-plant      = lv_ref_werks.  " TODO (Q16) - see RESOLVE_REF_WERKS
-      ls_gl-alloc_nmbr = |{ lv_ref_docnum }{ ls_it-itmnum }|.  " TODO (Q16) - see RESOLVE_REF_DOCNUM
-      ls_gl-item_text  = |ICMS benefit { lv_ref_docnum }/{ ls_it-itmnum }|.
-      APPEND ls_gl TO lt_gl.
-
-      CLEAR ls_cur.
-      ls_cur-itemno_acc = lv_itemno.
-      ls_cur-currency   = ls_it-waers.
-      ls_cur-amt_doccur = ls_it-credit_amount.
-      APPEND ls_cur TO lt_cur.
-
-      ls_it-buzei_fi = lv_itemno.  " debit line - traceability field
-      CLEAR ls_buzei.
-      ls_buzei-docnum = ls_it-docnum.
-      ls_buzei-itmnum = ls_it-itmnum.
-      ls_buzei-seqnr  = ls_it-seqnr.
-      ls_buzei-buzei  = lv_itemno.
-      APPEND ls_buzei TO lt_buzei.
-
-      lv_itemno = lv_itemno + 1.
-      CLEAR ls_gl.
-      ls_gl-itemno_acc = lv_itemno.
-      ls_gl-gl_account = gv_gl_credit.
-      ls_gl-comp_code  = ls_it-bukrs.
-      ls_gl-businessplace = ls_it-branch.
-      ls_gl-profit_ctr = ls_it-prctr.
-      ls_gl-material   = ls_it-matnr.
-      ls_gl-plant      = lv_ref_werks.  " TODO (Q16) - see RESOLVE_REF_WERKS
-      ls_gl-alloc_nmbr = |{ lv_ref_docnum }{ ls_it-itmnum }|.  " TODO (Q16) - see RESOLVE_REF_DOCNUM
-      ls_gl-item_text  = |ICMS benefit { lv_ref_docnum }/{ ls_it-itmnum }|.
-      APPEND ls_gl TO lt_gl.
-
-      CLEAR ls_cur.
-      ls_cur-itemno_acc = lv_itemno.
-      ls_cur-currency   = ls_it-waers.
-      ls_cur-amt_doccur = ls_it-credit_amount * -1.
-      APPEND ls_cur TO lt_cur.
-    ENDLOOP.
+    " GL/currency lines - built by BUILD_POSTING_LINES, shared with the
+    " API that hands these same lines to another process instead of
+    " posting them (GET_POSTING_DATA, Y0033FI_ICMS_F03).
+    PERFORM build_posting_lines USING pu_chunk 0
+                                CHANGING lt_gl lt_cur lt_buzei.
 
     CALL FUNCTION 'BAPI_ACC_DOCUMENT_POST'
       EXPORTING

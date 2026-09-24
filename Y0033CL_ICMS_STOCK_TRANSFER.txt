@@ -1,0 +1,182 @@
+*&---------------------------------------------------------------------*
+*& Class Y0033CL_ICMS_STOCK_TRANSFER  (SE24 - source-code based view)
+*&---------------------------------------------------------------------*
+*& CR 16002 - ICMS stock transfer benefit for a single nota fiscal
+*& (DOCNUM), for use by other programs/processes. All logic lives in
+*& function group Y0033FI_ICMS_API, which reuses the report programs'
+*& own FORMs - so everything done here (search, credit calculation,
+*& 021 - Auto Approved, posting, log) is identical to the Admin program.
+*&
+*& Two ways to use it:
+*&
+*& 1) AUTO_POST - this class posts its own accounting document:
+*&      y0033cl_icms_stock_transfer=>auto_post(
+*&        EXPORTING iv_docnum = lv_docnum
+*&        IMPORTING et_items  = lt_items
+*&                  et_return = lt_return ).
+*&
+*& 2) GET_POSTING_DATA + CONFIRM_EXTERNAL_POSTING - the lines are added
+*&    to an accounting document another process is posting anyway:
+*&      y0033cl_icms_stock_transfer=>get_posting_data(
+*&        EXPORTING iv_docnum          = lv_docnum
+*&                  iv_itemno_offset   = lines( lt_my_gl )  " after my own lines
+*&        IMPORTING et_accountgl       = lt_icms_gl
+*&                  et_currencyamount  = lt_icms_cur
+*&                  et_items           = lt_icms_items
+*&                  et_return          = lt_return ).
+*&      APPEND LINES OF lt_icms_gl  TO lt_my_gl.
+*&      APPEND LINES OF lt_icms_cur TO lt_my_cur.
+*&      CALL FUNCTION 'BAPI_ACC_DOCUMENT_POST' ... (my document)
+*&      " success -> BELNR/GJAHR of my document:
+*&      y0033cl_icms_stock_transfer=>confirm_external_posting(
+*&        EXPORTING iv_docnum = lv_docnum
+*&                  iv_belnr  = lv_belnr
+*&                  iv_gjahr  = lv_gjahr
+*&                  iv_budat  = lv_budat
+*&                  iv_bldat  = lv_bldat
+*&                  it_items  = lt_icms_items
+*&        IMPORTING et_return = lt_return ).
+*&      COMMIT WORK AND WAIT.  " my commit also commits the confirmation
+*&
+*&    CONFIRM_EXTERNAL_POSTING is mandatory after a successful posting:
+*&    it is what saves the items and marks them 040 - Posted. Without
+*&    it the job would post the same benefit again in its own document.
+*&    If my posting fails, just don't call it - nothing was saved.
+*&---------------------------------------------------------------------*
+CLASS y0033cl_icms_stock_transfer DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC.
+
+  PUBLIC SECTION.
+
+    CONSTANTS gc_default_bukrs TYPE bukrs VALUE '0033'.
+
+    "! Search + save as 021 (Auto Approved) + post now, for one nota
+    "! fiscal - same as the Admin program with P_AUTO + Create
+    "! Document(s). Origin nota (DIRECT = 2) uses the stock-transfer
+    "! model, destination nota (DIRECT = 1) the eDocument model.
+    "! Commits its own work.
+    "! @parameter iv_docnum | Nota fiscal (J_1BNFDOC-DOCNUM)
+    "! @parameter iv_bukrs  | Company code (default 0033)
+    "! @parameter et_items  | Every Y0033FI_ICM_ITEM row of the DOCNUM after the run
+    "! @parameter et_return | S = posted, E = failed, W = skipped/nothing to do
+    CLASS-METHODS auto_post
+      IMPORTING
+        iv_docnum TYPE j_1bdocnum
+        iv_bukrs  TYPE bukrs DEFAULT gc_default_bukrs
+      EXPORTING
+        et_items  TYPE y0033fi_icm_item_tt
+        et_return TYPE bapiret2_t.
+
+    "! Same items AUTO_POST would post, returned as
+    "! BAPI_ACC_DOCUMENT_POST lines (ACCOUNTGL/CURRENCYAMOUNT) instead of
+    "! posted, to be added to another accounting document. Saves and
+    "! commits nothing (except eDocument tracking rows, which ride the
+    "! caller's own commit). Must be followed by CONFIRM_EXTERNAL_POSTING
+    "! once that document is posted.
+    "! @parameter iv_docnum          | Nota fiscal (J_1BNFDOC-DOCNUM)
+    "! @parameter iv_bukrs           | Company code (default 0033)
+    "! @parameter iv_itemno_offset   | ITEMNO_ACC starts at offset + 1 (e.g. number of lines already in the caller's document)
+    "! @parameter et_accountgl       | GL lines (one debit/credit pair per item)
+    "! @parameter et_currencyamount  | Amounts for those lines
+    "! @parameter et_items           | Items behind the lines - pass unchanged to CONFIRM_EXTERNAL_POSTING
+    "! @parameter et_return          | Messages (E = nothing returned)
+    CLASS-METHODS get_posting_data
+      IMPORTING
+        iv_docnum         TYPE j_1bdocnum
+        iv_bukrs          TYPE bukrs DEFAULT gc_default_bukrs
+        iv_itemno_offset  TYPE posnr_acc DEFAULT 0
+      EXPORTING
+        et_accountgl      TYPE bapiacgl09_tab
+        et_currencyamount TYPE bapiaccr09_tab
+        et_items          TYPE y0033fi_icm_item_tt
+        et_return         TYPE bapiret2_t.
+
+    "! After the caller's document with the GET_POSTING_DATA lines is
+    "! posted: saves the new items as 021 and marks every item 040 -
+    "! Posted with that document's BELNR/GJAHR, with log.
+    "! @parameter iv_docnum | Nota fiscal (J_1BNFDOC-DOCNUM)
+    "! @parameter iv_bukrs  | Company code (default 0033)
+    "! @parameter iv_belnr  | Accounting document posted by the caller
+    "! @parameter iv_gjahr  | Its fiscal year
+    "! @parameter iv_budat  | Its posting date
+    "! @parameter iv_bldat  | Its document date
+    "! @parameter it_items  | ET_ITEMS from GET_POSTING_DATA, unchanged
+    "! @parameter iv_commit | abap_false (default) = the caller commits; abap_true = commit here
+    "! @parameter et_return | S = confirmed, E = not confirmed (reason)
+    CLASS-METHODS confirm_external_posting
+      IMPORTING
+        iv_docnum TYPE j_1bdocnum
+        iv_bukrs  TYPE bukrs DEFAULT gc_default_bukrs
+        iv_belnr  TYPE belnr_d
+        iv_gjahr  TYPE gjahr
+        iv_budat  TYPE budat
+        iv_bldat  TYPE bldat
+        it_items  TYPE y0033fi_icm_item_tt
+        iv_commit TYPE abap_bool DEFAULT abap_false
+      EXPORTING
+        et_return TYPE bapiret2_t.
+
+    "! abap_true if IT_RETURN has any E or A message
+    CLASS-METHODS has_error
+      IMPORTING
+        it_return       TYPE bapiret2_t
+      RETURNING
+        VALUE(rv_error) TYPE abap_bool.
+
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+
+
+CLASS y0033cl_icms_stock_transfer IMPLEMENTATION.
+
+  METHOD auto_post.
+    CALL FUNCTION 'Y0033FI_ICMS_AUTO_POST'
+      EXPORTING
+        iv_bukrs  = iv_bukrs
+        iv_docnum = iv_docnum
+      IMPORTING
+        et_items  = et_items
+        et_return = et_return.
+  ENDMETHOD.
+
+
+  METHOD get_posting_data.
+    CALL FUNCTION 'Y0033FI_ICMS_GET_POSTING_DATA'
+      EXPORTING
+        iv_bukrs          = iv_bukrs
+        iv_docnum         = iv_docnum
+        iv_itemno_offset  = iv_itemno_offset
+      IMPORTING
+        et_accountgl      = et_accountgl
+        et_currencyamount = et_currencyamount
+        et_items          = et_items
+        et_return         = et_return.
+  ENDMETHOD.
+
+
+  METHOD confirm_external_posting.
+    CALL FUNCTION 'Y0033FI_ICMS_CONFIRM_POSTING'
+      EXPORTING
+        iv_bukrs  = iv_bukrs
+        iv_docnum = iv_docnum
+        iv_belnr  = iv_belnr
+        iv_gjahr  = iv_gjahr
+        iv_budat  = iv_budat
+        iv_bldat  = iv_bldat
+        it_items  = it_items
+        iv_commit = iv_commit
+      IMPORTING
+        et_return = et_return.
+  ENDMETHOD.
+
+
+  METHOD has_error.
+    rv_error = xsdbool( line_exists( it_return[ type = 'E' ] )
+                     OR line_exists( it_return[ type = 'A' ] ) ).
+  ENDMETHOD.
+
+ENDCLASS.

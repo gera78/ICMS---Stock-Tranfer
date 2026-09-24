@@ -289,6 +289,21 @@ TYPES:
   END OF ty_item,
   ty_it_item TYPE STANDARD TABLE OF ty_item WITH DEFAULT KEY.
 
+* Accounting lines built by BUILD_POSTING_LINES (Y0033FI_ICMS_F02) -
+* posted directly by POST_ONE_DOCUMENT, or handed to another process
+* by the API (GET_POSTING_DATA, Y0033FI_ICMS_F03). TY_BUZEI_MAP links
+* each item to its debit line's ITEMNO_ACC (-> BUZEI_FI).
+TYPES:
+  ty_it_acc_gl  TYPE STANDARD TABLE OF bapiacgl09 WITH DEFAULT KEY,
+  ty_it_acc_cur TYPE STANDARD TABLE OF bapiaccr09 WITH DEFAULT KEY,
+  BEGIN OF ty_buzei_map,
+    docnum TYPE j_1bdocnum,
+    itmnum TYPE j_1bitmnum,
+    seqnr  TYPE y0033fi_icm_seq,
+    buzei  TYPE posnr_acc,
+  END OF ty_buzei_map,
+  ty_it_buzei_map TYPE STANDARD TABLE OF ty_buzei_map WITH DEFAULT KEY.
+
 TYPES:
   " Key is EDOC_GUID only (see CR16002_DDIC_SPEC.md) - DOCNUM may be
   " blank when the eDocument could not be linked to any nota fiscal
@@ -362,6 +377,19 @@ DATA:
                               " scope like FORM does, so this must be
                               " declared once, globally, not re-declared
                               " with DATA inside each MODULE
+
+* API mode (function group Y0033FI_ICMS_API / class
+* Y0033CL_ICMS_STOCK_TRANSFER - see Y0033FI_ICMS_F03). Both stay
+* initial in the two report programs, so they change nothing there.
+*   GV_API_MODE    - no WRITE/MESSAGE output from shared FORMs (results
+*                    go back in RETURN tables), and no COMMIT WORK in
+*                    SELECT_CANDIDATE_DOCUMENTS (the caller owns the LUW).
+*   GR_EDOC_GUID   - restricts SELECT_CANDIDATE_DOCUMENTS to these
+*                    eDocuments (the ones of a single DOCNUM), instead of
+*                    reading every completed eDocument of the type.
+DATA:
+  gv_api_mode  TYPE abap_bool,
+  gr_edoc_guid TYPE RANGE OF char32.
 
 * Lane maintenance screen (admin only, screen 300) - see
 * Y0033FI_ICMS_F02 FORM SHOW_LANE_MAINTENANCE and friends.
