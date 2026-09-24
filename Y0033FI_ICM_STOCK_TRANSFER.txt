@@ -29,6 +29,7 @@ START-OF-SELECTION.
     MESSAGE 'Enter a Company Code' TYPE 'E'.
   ENDIF.
   PERFORM check_bukrs_authority USING p_bukrs.
+  PERFORM clear_edoc_filters USING gc_enable_search_edoc.  " variant values of hidden fields - see CLEAR_EDOC_FILTERS
 
   PERFORM get_company_currency USING p_bukrs CHANGING gv_waers.
   PERFORM get_params USING p_bukrs.

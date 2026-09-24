@@ -63,6 +63,24 @@ FORM check_search_filters.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  CLEAR_EDOC_FILTERS
+*&---------------------------------------------------------------------*
+* S_DATUM (eDocument date) and S_ACCKEY (eDocument access key) only
+* make sense with the eDocument search model, and are hidden on the
+* selection screen without it (MODIF ID ED). A hidden field can still
+* carry a value - typed before the model was switched off, or saved in
+* a variant - which would silently drop every item (both filters are
+* strict: items without an eDocument never match them) and would also
+* count as "a filter" in HAS_SEARCH_FILTERS without really bounding the
+* search. So whenever the eDocument model is off, both are cleared.
+*---------------------------------------------------------------------*
+FORM clear_edoc_filters USING pu_edoc_model TYPE abap_bool.
+  IF pu_edoc_model = abap_false.
+    CLEAR: s_datum[], s_acckey[].
+  ENDIF.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  HAS_SEARCH_FILTERS
 *&---------------------------------------------------------------------*
 * Same rule as CHECK_SEARCH_FILTERS, without raising the message - for

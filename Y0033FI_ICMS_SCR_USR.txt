@@ -28,12 +28,12 @@ SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
 *   S_LCTO   = posting date of the accounting document (BUDAT_FI) -
 *              view mode only.
 *   S_ACTDAT = date an action happened (Y0033FI_ICM_LOG) - view mode only.
-    s_datum  FOR sy-datum,                        " eDocument date (created or changed)
+    s_datum  FOR sy-datum MODIF ID ed,            " eDocument date (created or changed) - eDocument model only, see MODIF ID ED below
     s_nfenum FOR j_1bnfdoc-nfenum,                " NFe number - zero-padded automatically, see SELECT_CANDIDATE_DOCUMENTS
     s_docnum FOR j_1bnfdoc-docnum,                " internal nota fiscal document number
     s_series FOR j_1bnfdoc-series,                " NFe series
     s_docdat FOR j_1bnfdoc-docdat,                " nota fiscal date - every mode (search: J_1BNFDOC-DOCDAT, view: ITEM-DOCDAT, see REFRESH_FROM_DB)
-    s_acckey FOR y0033fi_icm_edoc-accesskey,      " NF-e access key (44 digits) - typed against Y0033FI_ICM_EDOC-ACCESSKEY (CHAR44), not the source table directly: EDOBRINCOMING-ACCESSKEY is TYPE STRING, which selection-screen fields can't use
+    s_acckey FOR y0033fi_icm_edoc-accesskey MODIF ID ed, " eDocument model only (MODIF ID ED) - NF-e access key (44 digits) - typed against Y0033FI_ICM_EDOC-ACCESSKEY (CHAR44), not the source table directly: EDOBRINCOMING-ACCESSKEY is TYPE STRING, which selection-screen fields can't use
 * S_LCTO only applies in view mode - nothing is posted yet in search
 * mode, so it is hidden there (same MODIF ID FV as the status filter).
     s_lcto   FOR sy-datum MODIF ID fv,
@@ -211,6 +211,10 @@ AT SELECTION-SCREEN OUTPUT.
       screen-active = 0.  " hide entirely - only applies when searching new candidates
       MODIFY SCREEN.
     ENDIF.
+    IF screen-group1 = 'ED' AND gc_enable_search_edoc = abap_false.
+      screen-active = 0.  " eDocument filters (S_DATUM/S_ACCKEY) - only with the eDocument model (GC_ENABLE_SEARCH_EDOC, Y0033FI_ICMS_TOP)
+      MODIFY SCREEN.
+    ENDIF.
     IF screen-group1 = 'FV' AND p_mview <> 'X'.
       screen-active = 0.  " hide entirely - only applies to view mode
       MODIFY SCREEN.
@@ -228,6 +232,7 @@ AT SELECTION-SCREEN.
 * ONLI = the user pressed Execute (F8), not just clicked a radio
 * button/checkbox - only THEN is P_BUKRS actually required (and its
 * authorization worth checking).
+  PERFORM clear_edoc_filters USING gc_enable_search_edoc.  " hidden eDocument filters never restrict (or count as a filter) - see CLEAR_EDOC_FILTERS
   IF sy-ucomm = 'ONLI'.
     IF p_bukrs IS INITIAL.
       MESSAGE 'Enter a Company Code' TYPE 'E'.
