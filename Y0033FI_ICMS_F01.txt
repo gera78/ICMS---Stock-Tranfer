@@ -69,8 +69,11 @@ ENDFORM.
 *   - ITEM_DIRECT: direction of the item's own DOCNUM (J_1BNFDOC);
 *   - DOCNUM_REF, when still blank: the counterpart nota - same NFENUM+
 *     SERIES+BUKRS, opposite direction, not cancelled, exactly one
-*     (same rule as the search). Display only here - not written back;
-*     it gets saved with the next candidate cycle of the item;
+*     (same rule as the search). When found, it is also WRITTEN BACK to
+*     Y0033FI_ICM_ITEM (backfill): in the stock-transfer model the
+*     destination nota usually doesn't exist yet when the candidate is
+*     saved, so this is how DOCNUM_REF gets persisted once it does. Only
+*     the blank field is updated (no status change, no log row);
 *   - DOCNUM_ORIG/DOCNUM_DEST spelled out from the two.
 * One bulk read of J_1BNFDOC for all rows.
 *---------------------------------------------------------------------*
@@ -102,6 +105,9 @@ FORM fill_docnum_ref.
       AND bukrs  = @lt_nf_key-bukrs.
   SORT lt_nf BY docnum.
 
+  DATA lv_backfilled  TYPE abap_bool.
+  DATA lv_ref_initial TYPE j_1bnfdoc-docnum.  " '0000000000'
+
   LOOP AT git_item INTO gwa_item.
     DATA(lv_tabix) = sy-tabix.
 
@@ -122,6 +128,17 @@ FORM fill_docnum_ref.
       ENDLOOP.
       IF lv_found = 1.
         gwa_item-docnum_ref = lv_ref.
+        " Backfill - only while still blank in the table: never
+        " overwrites a value saved in the meantime by another session.
+        " (NUMC field added to an existing table: rows that already
+        " existed may hold NULL instead of '0000000000' - both count as
+        " blank.)
+        UPDATE y0033fi_icm_item SET docnum_ref = @lv_ref
+          WHERE docnum = @gwa_item-docnum AND itmnum = @gwa_item-itmnum AND seqnr = @gwa_item-seqnr
+            AND ( docnum_ref = @lv_ref_initial OR docnum_ref IS NULL ).
+        IF sy-subrc = 0.
+          lv_backfilled = abap_true.
+        ENDIF.
       ENDIF.
     ENDIF.
 
@@ -137,6 +154,42 @@ FORM fill_docnum_ref.
     MODIFY git_item FROM gwa_item INDEX lv_tabix
       TRANSPORTING item_direct docnum_ref docnum_orig docnum_dest.
   ENDLOOP.
+
+  IF lv_backfilled = abap_true.
+    COMMIT WORK.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  BACKFILL_DOCNUM_REF
+*&---------------------------------------------------------------------*
+* Background job step: every item of the company still without
+* DOCNUM_REF goes through FILL_DOCNUM_REF, which saves the counterpart
+* nota once it exists (typically the destination nota, created when the
+* destination branch receives the NF-e - after the candidate was
+* saved). So DOCNUM_REF gets persisted even if nobody opens the
+* view/admin screens. GIT_ITEM is only borrowed (empty in a job).
+*---------------------------------------------------------------------*
+FORM backfill_docnum_ref USING pu_bukrs TYPE bukrs.
+
+  DATA lt_blank TYPE STANDARD TABLE OF y0033fi_icm_item WITH DEFAULT KEY.
+  DATA lv_ref_initial TYPE j_1bnfdoc-docnum.  " '0000000000'
+  " NULL too - rows that existed before the DOCNUM_REF field was added.
+  SELECT * FROM y0033fi_icm_item
+    INTO TABLE @lt_blank
+    WHERE bukrs = @pu_bukrs
+      AND ( docnum_ref = @lv_ref_initial OR docnum_ref IS NULL ).
+  CHECK lt_blank IS NOT INITIAL.
+
+  CLEAR git_item.
+  LOOP AT lt_blank INTO DATA(ls_blank).
+    CLEAR gwa_item.
+    MOVE-CORRESPONDING ls_blank TO gwa_item.
+    APPEND gwa_item TO git_item.
+  ENDLOOP.
+  PERFORM fill_docnum_ref.
+  CLEAR git_item.
 
 ENDFORM.
 

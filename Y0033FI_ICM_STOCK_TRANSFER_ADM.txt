@@ -97,6 +97,7 @@ START-OF-SELECTION.
     PERFORM check_nf_cancellation.
     PERFORM post_released_items.
     PERFORM execute_reversal.
+    PERFORM backfill_docnum_ref USING p_bukrs.  " counterpart nota (usually the destination) once it exists
     WRITE: / 'Background run finished:', sy-datum, sy-uzeit.
     RETURN.
   ENDIF.
