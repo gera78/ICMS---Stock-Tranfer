@@ -669,6 +669,26 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
 
   CHECK lt_transfer IS NOT INITIAL.
 
+  " Only NF-e already authorized by SEFAZ: J_1BNFE_ACTIVE-DOCSTA = 1
+  " (authorized) AND CODE = 100 ("Autorizado o uso da NF-e"). A nota
+  " still waiting, rejected or denied at SEFAZ is not a candidate yet -
+  " it becomes one in a later search, once it is authorized.
+  SELECT docnum FROM j_1bnfe_active
+    INTO TABLE @DATA(lt_nfe_authorized)
+    FOR ALL ENTRIES IN @lt_transfer
+    WHERE docnum = @lt_transfer-docnum
+      AND docsta = '1'
+      AND code   = '100'.
+  SORT lt_nfe_authorized BY table_line.
+  LOOP AT lt_transfer INTO DATA(ls_nfe_chk).
+    READ TABLE lt_nfe_authorized TRANSPORTING NO FIELDS BINARY SEARCH
+      WITH KEY table_line = ls_nfe_chk-docnum.
+    IF sy-subrc <> 0.
+      DELETE lt_transfer.
+    ENDIF.
+  ENDLOOP.
+  CHECK lt_transfer IS NOT INITIAL.
+
   " Destination (DIRECT=1) counterpart, same NFENUM+SERIES+BUKRS - bulk
   " lookup purely to record DOCNUM_DEST alongside DOCNUM (=DOCNUM_ORIG,
   " the DIRECT=2 side this FORM matches on) for traceability. Never
