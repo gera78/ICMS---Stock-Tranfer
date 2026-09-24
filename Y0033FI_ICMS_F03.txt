@@ -47,7 +47,7 @@ FORM api_prepare USING    pu_bukrs  TYPE bukrs
   pc_ok = abap_false.
   gv_api_mode = abap_true.
   CLEAR: git_item, gr_edoc_guid,
-         s_datum, s_nfenum, s_docnum, s_series, s_docdat, s_acckey, s_lcto, s_actdat,
+         s_datum, s_nfenum, s_docnum, s_series, s_docdat, s_autdat, s_acckey, s_lcto, s_actdat,
          p_mode1, p_mode2.
   " Action-date filter checkboxes (REFRESH_FROM_DB) - not used by the
   " API, set like the report's defaults only for consistency.

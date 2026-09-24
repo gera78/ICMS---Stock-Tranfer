@@ -26,6 +26,10 @@ SELECT-OPTIONS:
 *              items with no eDocument (stock-transfer model, P_MODE2)
 *              never match it, so none of them come back when it's filled.
 *   S_DOCDAT = nota fiscal date (J_1BNFDOC-DOCDAT / ITEM-DOCDAT).
+*   S_AUTDAT = NF-e authorization date at SEFAZ (J_1BNFE_ACTIVE-AUTHDATE)
+*              - stock-transfer model, search only. Authorization can
+*              come hours after the nota's own date, so a daily job
+*              should use this one (yesterday..today), not S_DOCDAT.
 *   S_LCTO   = posting date of the accounting document (BUDAT_FI) -
 *              view/admin review only.
 *   S_ACTDAT = date an action happened (Y0033FI_ICM_LOG) - view/admin
@@ -35,6 +39,7 @@ SELECT-OPTIONS:
   s_docnum FOR j_1bnfdoc-docnum,                " internal nota fiscal document number
   s_series FOR j_1bnfdoc-series,                " NFe series
   s_docdat FOR j_1bnfdoc-docdat,                " nota fiscal date - every mode (search: J_1BNFDOC-DOCDAT, view: ITEM-DOCDAT, see REFRESH_FROM_DB)
+  s_autdat FOR sy-datum MODIF ID fa,            " NF-e authorization date (J_1BNFE_ACTIVE-AUTHDATE) - transfer model, search/Auto Approved only
   s_acckey FOR y0033fi_icm_edoc-accesskey MODIF ID ed, " eDocument model only (MODIF ID ED) - NF-e access key (44 digits) - typed against Y0033FI_ICM_EDOC-ACCESSKEY (CHAR44), not the source table directly: EDOBRINCOMING-ACCESSKEY is TYPE STRING, which selection-screen fields can't use
 * S_LCTO only applies in view/admin-review mode - nothing is posted
 * yet in search mode, so it is hidden there.

@@ -91,7 +91,8 @@ FORM has_search_filters CHANGING pc_ok TYPE abap_bool.
 
   pc_ok = xsdbool( s_datum[]  IS NOT INITIAL OR s_nfenum[] IS NOT INITIAL
                 OR s_docnum[] IS NOT INITIAL OR s_series[] IS NOT INITIAL
-                OR s_docdat[] IS NOT INITIAL OR s_acckey[] IS NOT INITIAL ).
+                OR s_docdat[] IS NOT INITIAL OR s_acckey[] IS NOT INITIAL
+                OR s_autdat[] IS NOT INITIAL ).
 
 ENDFORM.
 
@@ -328,6 +329,13 @@ ENDFORM.
 * and do NOT become a candidate.
 *---------------------------------------------------------------------*
 FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
+
+  " S_AUTDAT (NF-e authorization date) belongs to the stock-transfer
+  " model - same "strict" rule as S_DATUM/S_ACCKEY there: when it is
+  " filled, this model returns nothing, instead of ignoring it (it
+  " also counts as a search filter in HAS_SEARCH_FILTERS, so ignoring
+  " it would leave this read unbounded).
+  CHECK s_autdat[] IS INITIAL.
 
   DATA(lt_nfenum) = s_nfenum[].
   PERFORM pad_nfenum_range CHANGING lt_nfenum.
@@ -672,18 +680,63 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
 
   " CANCEL <> 'X' - same reasoning as SELECT_CANDIDATE_DOCUMENTS: a
   " cancelled DOCNUM must never become a candidate here either.
-  SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel,
-         parid, regio, cnpj_bupla
-    FROM j_1bnfdoc
-    INTO TABLE @DATA(lt_transfer)
-    WHERE bukrs  = @pu_bukrs
-      AND direct = '2'
-      AND cancel <> 'X'
-      AND branch IN @lr_branch
-      AND nfenum IN @lt_nfenum
-      AND docnum IN @s_docnum
-      AND series IN @s_series
-      AND docdat IN @s_docdat.
+  TYPES: BEGIN OF ty_transfer,
+           docnum     TYPE j_1bnfdoc-docnum,
+           nfenum     TYPE j_1bnfdoc-nfenum,
+           series     TYPE j_1bnfdoc-series,
+           bukrs      TYPE j_1bnfdoc-bukrs,
+           branch     TYPE j_1bnfdoc-branch,
+           land1      TYPE j_1bnfdoc-land1,
+           docdat     TYPE j_1bnfdoc-docdat,
+           cancel     TYPE j_1bnfdoc-cancel,
+           parid      TYPE j_1bnfdoc-parid,
+           regio      TYPE j_1bnfdoc-regio,
+           cnpj_bupla TYPE j_1bnfdoc-cnpj_bupla,
+         END OF ty_transfer.
+  DATA lt_transfer TYPE STANDARD TABLE OF ty_transfer WITH DEFAULT KEY.
+
+  IF s_autdat[] IS NOT INITIAL.
+    " Authorization-date search: start from J_1BNFE_ACTIVE (authorized
+    " origin NF-e of this company in the S_AUTDAT range), so J_1BNFDOC
+    " is only read for those - never the whole company's history just
+    " to keep one day's worth. Same authorization rule as below.
+    SELECT docnum FROM j_1bnfe_active
+      INTO TABLE @DATA(lt_aut_docnum)
+      WHERE bukrs    = @pu_bukrs
+        AND direct   = '2'
+        AND docsta   = '1'
+        AND code     = '100'
+        AND authdate IN @s_autdat.
+    CHECK lt_aut_docnum IS NOT INITIAL.
+
+    SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel,
+           parid, regio, cnpj_bupla
+      FROM j_1bnfdoc
+      INTO TABLE @lt_transfer
+      FOR ALL ENTRIES IN @lt_aut_docnum
+      WHERE docnum = @lt_aut_docnum-table_line
+        AND bukrs  = @pu_bukrs
+        AND direct = '2'
+        AND cancel <> 'X'
+        AND branch IN @lr_branch
+        AND nfenum IN @lt_nfenum
+        AND docnum IN @s_docnum
+        AND series IN @s_series
+        AND docdat IN @s_docdat.
+  ELSE.
+    SELECT docnum, nfenum, series, bukrs, branch, land1, docdat, cancel,
+           parid, regio, cnpj_bupla
+      FROM j_1bnfdoc
+      INTO TABLE @lt_transfer
+      WHERE bukrs  = @pu_bukrs
+        AND direct = '2'
+        AND cancel <> 'X'
+        AND branch IN @lr_branch
+        AND nfenum IN @lt_nfenum
+        AND docnum IN @s_docnum
+        AND series IN @s_series
+        AND docdat IN @s_docdat.
+  ENDIF.
 
   CHECK lt_transfer IS NOT INITIAL.
 
@@ -691,12 +744,14 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
   " (authorized) AND CODE = 100 ("Autorizado o uso da NF-e"). A nota
   " still waiting, rejected or denied at SEFAZ is not a candidate yet -
   " it becomes one in a later search, once it is authorized.
+  " S_AUTDAT (authorization date at SEFAZ) is applied here too.
   SELECT docnum FROM j_1bnfe_active
     INTO TABLE @DATA(lt_nfe_authorized)
     FOR ALL ENTRIES IN @lt_transfer
-    WHERE docnum = @lt_transfer-docnum
-      AND docsta = '1'
-      AND code   = '100'.
+    WHERE docnum   = @lt_transfer-docnum
+      AND docsta   = '1'
+      AND code     = '100'
+      AND authdate IN @s_autdat.
   SORT lt_nfe_authorized BY table_line.
   LOOP AT lt_transfer INTO DATA(ls_nfe_chk).
     READ TABLE lt_nfe_authorized TRANSPORTING NO FIELDS BINARY SEARCH

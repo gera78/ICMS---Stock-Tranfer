@@ -23,6 +23,7 @@ DATA:
   s_docnum TYPE RANGE OF j_1bnfdoc-docnum,
   s_series TYPE RANGE OF j_1bnfdoc-series,
   s_docdat TYPE RANGE OF j_1bnfdoc-docdat,
+  s_autdat TYPE RANGE OF sy-datum,
   s_acckey TYPE RANGE OF y0033fi_icm_edoc-accesskey,
   s_lcto   TYPE RANGE OF sy-datum,
   s_actdat TYPE RANGE OF sy-datum,
