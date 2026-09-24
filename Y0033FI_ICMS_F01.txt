@@ -199,7 +199,9 @@ FORM backfill_docnum_ref USING pu_bukrs TYPE bukrs.
   ENDIF.
 
   IF sy-batch = abap_true.
-    WRITE: / 'Counterpart DOCNUM recovery:', lines( lt_blank ), 'item(s) without it,',
+    DATA lv_blank_count TYPE i.
+    lv_blank_count = lines( lt_blank ).
+    WRITE: / 'Counterpart DOCNUM recovery:', lv_blank_count, 'item(s) without it,',
              lv_recovered, 'recovered'.
   ENDIF.
 
