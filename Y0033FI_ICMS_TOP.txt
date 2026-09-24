@@ -194,12 +194,19 @@ TYPES:
     " origin (DIRECT=2) when found by SELECT_TRANSFER_CANDIDATES;
     " unchanged meaning, do not repurpose.
     docnum       TYPE j_1bnfdoc-docnum,
-    " DOCNUM_ORIG/DOCNUM_DEST: origin (DIRECT=2)/destination (DIRECT=1)
-    " DOCNUM for this same NFENUM+SERIES+BUKRS, filled by both
-    " SELECT_CANDIDATE_DOCUMENTS and SELECT_TRANSFER_CANDIDATES when
-    " exactly one counterpart exists; blank if not (yet) found. NOT YET
-    " PERSISTED - requires matching fields on Y0033FI_ICM_ITEM (DDIC
-    " change, not done here).
+    " DOCNUM_REF: the counterpart nota of DOCNUM - same NFENUM+SERIES+
+    " BUKRS, opposite direction (destination for a stock-transfer item,
+    " origin for an eDocument item), when exactly one exists. PERSISTED
+    " (Y0033FI_ICM_ITEM-DOCNUM_REF), saved together with the candidate;
+    " when still blank (older items, or destination not created yet at
+    " save time) it is looked up again at display - see FILL_DOCNUM_REF.
+    docnum_ref   TYPE j_1bnfdoc-docnum,
+    " Internal, never persisted: direction of DOCNUM ('2' = origin/
+    " stock-transfer model, '1' = destination/eDocument model) and the
+    " two DOCNUMs spelled out by direction - derived from DOCNUM +
+    " DOCNUM_REF, used for the NF-e authorization date, the eDocument
+    " lookup and the DOCNUM_REF column title.
+    item_direct  TYPE j_1bnfdoc-direct,
     docnum_orig  TYPE j_1bnfdoc-docnum,
     docnum_dest  TYPE j_1bnfdoc-docnum,
     itmnum       TYPE j_1bnflin-itmnum,

@@ -63,6 +63,84 @@ FORM check_search_filters.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  FILL_DOCNUM_REF
+*&---------------------------------------------------------------------*
+* For every row of GIT_ITEM read back from Y0033FI_ICM_ITEM:
+*   - ITEM_DIRECT: direction of the item's own DOCNUM (J_1BNFDOC);
+*   - DOCNUM_REF, when still blank: the counterpart nota - same NFENUM+
+*     SERIES+BUKRS, opposite direction, not cancelled, exactly one
+*     (same rule as the search). Display only here - not written back;
+*     it gets saved with the next candidate cycle of the item;
+*   - DOCNUM_ORIG/DOCNUM_DEST spelled out from the two.
+* One bulk read of J_1BNFDOC for all rows.
+*---------------------------------------------------------------------*
+FORM fill_docnum_ref.
+
+  TYPES: BEGIN OF ty_nf_key,
+           nfenum TYPE j_1bnfdoc-nfenum,
+           series TYPE j_1bnfdoc-series,
+           bukrs  TYPE j_1bnfdoc-bukrs,
+         END OF ty_nf_key.
+  DATA lt_nf_key TYPE STANDARD TABLE OF ty_nf_key WITH DEFAULT KEY.
+
+  LOOP AT git_item INTO gwa_item.
+    APPEND VALUE #( nfenum = gwa_item-nfenum series = gwa_item-series bukrs = gwa_item-bukrs ) TO lt_nf_key.
+  ENDLOOP.
+  SORT lt_nf_key BY nfenum series bukrs.
+  DELETE ADJACENT DUPLICATES FROM lt_nf_key COMPARING nfenum series bukrs.
+  CHECK lt_nf_key IS NOT INITIAL.
+
+  " Cancelled notas are read too: the item's own DOCNUM may be
+  " cancelled by now and its direction is still needed - they are only
+  " skipped as a counterpart below.
+  SELECT docnum, nfenum, series, bukrs, direct, cancel
+    FROM j_1bnfdoc
+    INTO TABLE @DATA(lt_nf)
+    FOR ALL ENTRIES IN @lt_nf_key
+    WHERE nfenum = @lt_nf_key-nfenum
+      AND series = @lt_nf_key-series
+      AND bukrs  = @lt_nf_key-bukrs.
+  SORT lt_nf BY docnum.
+
+  LOOP AT git_item INTO gwa_item.
+    DATA(lv_tabix) = sy-tabix.
+
+    READ TABLE lt_nf INTO DATA(ls_own) BINARY SEARCH WITH KEY docnum = gwa_item-docnum.
+    IF sy-subrc = 0.
+      gwa_item-item_direct = ls_own-direct.
+    ENDIF.
+
+    IF gwa_item-docnum_ref IS INITIAL AND gwa_item-item_direct IS NOT INITIAL.
+      DATA lv_found TYPE i.
+      DATA lv_ref   TYPE j_1bnfdoc-docnum.
+      CLEAR: lv_found, lv_ref.
+      LOOP AT lt_nf INTO DATA(ls_other)
+        WHERE nfenum = gwa_item-nfenum AND series = gwa_item-series AND bukrs = gwa_item-bukrs
+          AND direct <> gwa_item-item_direct AND cancel <> 'X'.
+        lv_found = lv_found + 1.
+        lv_ref   = ls_other-docnum.
+      ENDLOOP.
+      IF lv_found = 1.
+        gwa_item-docnum_ref = lv_ref.
+      ENDIF.
+    ENDIF.
+
+    CASE gwa_item-item_direct.
+      WHEN '2'.  " origin - stock-transfer model
+        gwa_item-docnum_orig = gwa_item-docnum.
+        gwa_item-docnum_dest = gwa_item-docnum_ref.
+      WHEN '1'.  " destination - eDocument model
+        gwa_item-docnum_dest = gwa_item-docnum.
+        gwa_item-docnum_orig = gwa_item-docnum_ref.
+    ENDCASE.
+
+    MODIFY git_item FROM gwa_item INDEX lv_tabix
+      TRANSPORTING item_direct docnum_ref docnum_orig docnum_dest.
+  ENDLOOP.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  FILL_NFE_AUTHDATE
 *&---------------------------------------------------------------------*
 * NFE_AUTHDATE (display only, never persisted) for every row of
@@ -586,6 +664,8 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     gwa_item-docnum      = ls_nfdoc-docnum.
     gwa_item-docnum_dest = ls_nfdoc-docnum.  " this FORM matches on DIRECT=1 (destination)
     gwa_item-docnum_orig = lv_docnum_orig.
+    gwa_item-docnum_ref  = lv_docnum_orig.  " counterpart = origin - saved with the candidate
+    gwa_item-item_direct = '1'.
     gwa_item-nfenum       = ls_nfdoc-nfenum.
     gwa_item-series      = ls_nfdoc-series.
     gwa_item-bukrs       = ls_nfdoc-bukrs.
@@ -913,6 +993,8 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
     gwa_item-docnum      = ls_nfdoc-docnum.
     gwa_item-docnum_orig = ls_nfdoc-docnum.  " this FORM matches on DIRECT=2 (origin)
     gwa_item-docnum_dest = lv_docnum_dest.
+    gwa_item-docnum_ref  = lv_docnum_dest.  " counterpart = destination - saved with the candidate
+    gwa_item-item_direct = '2'.
     gwa_item-nfenum      = ls_nfdoc-nfenum.
     gwa_item-series      = ls_nfdoc-series.
     gwa_item-bukrs       = ls_nfdoc-bukrs.
@@ -1410,8 +1492,7 @@ FORM build_celltab.
   " Every column name that appears in BUILD_FIELDCAT, except SEL.
   DATA lt_fieldnames TYPE TABLE OF lvc_fname.
   APPEND: 'DOCNUM'       TO lt_fieldnames,
-          'DOCNUM_ORIG'  TO lt_fieldnames,
-          'DOCNUM_DEST'  TO lt_fieldnames,
+          'DOCNUM_REF'   TO lt_fieldnames,
           'NFENUM'       TO lt_fieldnames,
           'ITMNUM'       TO lt_fieldnames,
           'SEQNR'        TO lt_fieldnames,
@@ -2529,6 +2610,11 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
     ENDLOOP.
   ENDIF.
 
+  " DOCNUM_REF (looked up again when still blank) and the derived
+  " direction/DOCNUM_ORIG/DOCNUM_DEST - needed right below for the
+  " eDocument lookup, and later for the NF-e authorization date.
+  PERFORM fill_docnum_ref.
+
 * NICE TO HAVE: for transfer-flow items (SELECT_TRANSFER_CANDIDATES),
 * EDOC_GUID is saved blank (that flow has no eDocument dependency) and
 * only ever resolved here, in memory, for display - if the inbound
@@ -2538,10 +2624,18 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
 * priority: EDOC_GUID was never this flow's identity/traceability key
 * (DOCNUM+ITMNUM+SEQNR is), so this only matters if something outside
 * this program's own screens reads EDOC_GUID directly off the table.
+  " Y0033FI_ICM_EDOC links eDocuments to the DESTINATION nota (the
+  " inbound eDocument) - so the lookup uses DOCNUM_DEST: for a
+  " stock-transfer item that's DOCNUM_REF, not the item's own (origin)
+  " DOCNUM, and the eDocument shows up here once the destination
+  " receives the NF-e.
   LOOP AT git_item INTO gwa_item.
     DATA(lv_tabix) = sy-tabix.
     DATA lv_latest_guid TYPE char32.
-    PERFORM get_latest_edoc_guid USING gwa_item-docnum CHANGING lv_latest_guid.
+    DATA(lv_edoc_docnum) = COND j_1bnfdoc-docnum( WHEN gwa_item-docnum_dest IS NOT INITIAL
+                                                   THEN gwa_item-docnum_dest
+                                                   ELSE gwa_item-docnum ).
+    PERFORM get_latest_edoc_guid USING lv_edoc_docnum CHANGING lv_latest_guid.
     IF lv_latest_guid IS NOT INITIAL.
       gwa_item-edoc_guid = lv_latest_guid. " display: latest known, may differ from the one used at posting time
       MODIFY git_item FROM gwa_item INDEX lv_tabix.
@@ -2663,14 +2757,23 @@ FORM build_fieldcat USING pu_mode TYPE c.
   APPEND ls_fcat TO gt_fcat.
   add_field 'SERIES'      'Series'              4.
 
-  " DOCNUM_ORIG/DOCNUM_DEST - origin/destination DOCNUM for this same
-  " NFENUM+SERIES+BUKRS, resolved by whichever search model found the
-  " candidate (see SELECT_CANDIDATE_DOCUMENTS/SELECT_TRANSFER_CANDIDATES).
-  " Display only for now - NOT YET PERSISTED (Y0033FI_ICM_ITEM has no
-  " matching DDIC fields yet), so these go blank again after a reload
-  " from the DB (View/Admin modes) until that DDIC change is made.
-  add_field 'DOCNUM_ORIG' 'DocNum Orig.'       12.
-  add_field 'DOCNUM_DEST' 'DocNum Dest.'       12.
+  " DOCNUM_REF - the counterpart nota of DOCNUM (see TY_ITEM). One
+  " column; its title says which side it is, from the rows on screen:
+  " all stock-transfer items (DOCNUM = origin) -> "DocNum Dest.", all
+  " eDocument items (DOCNUM = destination) -> "DocNum Orig.", mixed ->
+  " "DocNum Counterp.". An ALV column has one title for every row,
+  " hence the rule by the whole list (decided when the grid opens).
+  DATA lv_has_orig_items TYPE abap_bool.
+  DATA lv_has_dest_items TYPE abap_bool.
+  lv_has_orig_items = xsdbool( line_exists( git_item[ item_direct = '2' ] ) ).
+  lv_has_dest_items = xsdbool( line_exists( git_item[ item_direct = '1' ] ) ).
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'DOCNUM_REF'.
+  ls_fcat-coltext   = COND #( WHEN lv_has_orig_items = abap_true AND lv_has_dest_items = abap_false THEN 'DocNum Dest.'
+                              WHEN lv_has_dest_items = abap_true AND lv_has_orig_items = abap_false THEN 'DocNum Orig.'
+                              ELSE 'DocNum Counterp.' ).
+  ls_fcat-outputlen = 12.
+  APPEND ls_fcat TO gt_fcat.
 
   " MATNR gets its own entry (not the plain macro) so the ALV applies
   " the material number conversion exit (leading zero handling, etc.)
@@ -2708,10 +2811,22 @@ FORM build_fieldcat USING pu_mode TYPE c.
   " EDOC_GUID is clickable (hotspot) - see LCL_ALV_EVENTS in the TOP
   " include, registered on the grid in each screen's PBO.
   CLEAR ls_fcat.
+  " EDOC_GUID / EDOC_CREATE_DATE hidden (NO_OUT - still available via
+  " the layout button) when no row on screen has an eDocument, which
+  " is the normal case with the stock-transfer model.
+  DATA lv_no_edoc TYPE abap_bool.
+  lv_no_edoc = abap_true.
+  LOOP AT git_item TRANSPORTING NO FIELDS WHERE edoc_guid IS NOT INITIAL.
+    lv_no_edoc = abap_false.
+    EXIT.
+  ENDLOOP.
+
+  CLEAR ls_fcat.
   ls_fcat-fieldname = 'EDOC_GUID'.
   ls_fcat-coltext   = 'eDocument'.
   ls_fcat-outputlen = 20.
   ls_fcat-hotspot   = abap_true.
+  ls_fcat-no_out    = lv_no_edoc.
   APPEND ls_fcat TO gt_fcat.
 
   " Display only - not a Y0033FI_ICM_ITEM field, see EDOC_CREATE_DATE
@@ -2721,6 +2836,7 @@ FORM build_fieldcat USING pu_mode TYPE c.
   ls_fcat-coltext   = 'eDoc Created on'.
   ls_fcat-outputlen = 10.
   ls_fcat-datatype  = 'DATS'.
+  ls_fcat-no_out    = lv_no_edoc.
   APPEND ls_fcat TO gt_fcat.
 
   " A607 access-key fields (see DETERMINE_BENEFIT_PERCENTAGE) - shown
