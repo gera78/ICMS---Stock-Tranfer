@@ -695,8 +695,12 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
     " origin NF-e of this company in the S_AUTDAT range), so J_1BNFDOC
     " is only read for those - never the whole company's history just
     " to keep one day's worth. Same authorization rule as below.
+    " Explicit elementary table (not @DATA(...)) - an inline single-column
+    " SELECT comes out with a structured row here, where TABLE_LINE
+    " (used in FOR ALL ENTRIES below) is not allowed.
+    DATA lt_aut_docnum TYPE STANDARD TABLE OF j_1bnfdoc-docnum WITH DEFAULT KEY.
     SELECT docnum FROM j_1bnfe_active
-      INTO TABLE @DATA(lt_aut_docnum)
+      INTO TABLE @lt_aut_docnum
       WHERE bukrs    = @pu_bukrs
         AND direct   = '2'
         AND docsta   = '1'
@@ -740,8 +744,9 @@ FORM select_transfer_candidates USING pu_bukrs TYPE bukrs.
   " still waiting, rejected or denied at SEFAZ is not a candidate yet -
   " it becomes one in a later search, once it is authorized.
   " S_AUTDAT (authorization date at SEFAZ) is applied here too.
+  DATA lt_nfe_authorized TYPE STANDARD TABLE OF j_1bnfdoc-docnum WITH DEFAULT KEY.  " elementary - see LT_AUT_DOCNUM above
   SELECT docnum FROM j_1bnfe_active
-    INTO TABLE @DATA(lt_nfe_authorized)
+    INTO TABLE @lt_nfe_authorized
     FOR ALL ENTRIES IN @lt_transfer
     WHERE docnum   = @lt_transfer-docnum
       AND docsta   = '1'
