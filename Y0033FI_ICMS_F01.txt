@@ -63,6 +63,53 @@ FORM check_search_filters.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
+*&      Form  FILL_NFE_AUTHDATE
+*&---------------------------------------------------------------------*
+* NFE_AUTHDATE (display only, never persisted) for every row of
+* GIT_ITEM: SEFAZ authorization date (J_1BNFE_ACTIVE-AUTHDATE) of the
+* ORIGIN NF-e - the same date S_AUTDAT filters on. The origin nota is
+* DOCNUM_ORIG when known (both search models fill it), else DOCNUM
+* itself. Read in bulk; left blank when not found. Called at the end
+* of REFRESH_FROM_DB and of the search chain in both main programs.
+*---------------------------------------------------------------------*
+FORM fill_nfe_authdate.
+
+  TYPES: BEGIN OF ty_nfe_key,
+           docnum TYPE j_1bnfdoc-docnum,
+         END OF ty_nfe_key.
+  DATA lt_nfe_key TYPE STANDARD TABLE OF ty_nfe_key WITH DEFAULT KEY.
+
+  LOOP AT git_item INTO gwa_item.
+    APPEND VALUE #( docnum = COND #( WHEN gwa_item-docnum_orig IS NOT INITIAL
+                                     THEN gwa_item-docnum_orig
+                                     ELSE gwa_item-docnum ) ) TO lt_nfe_key.
+  ENDLOOP.
+  SORT lt_nfe_key BY docnum.
+  DELETE ADJACENT DUPLICATES FROM lt_nfe_key COMPARING docnum.
+  CHECK lt_nfe_key IS NOT INITIAL.
+
+  SELECT docnum, authdate FROM j_1bnfe_active
+    INTO TABLE @DATA(lt_nfe_auth)
+    FOR ALL ENTRIES IN @lt_nfe_key
+    WHERE docnum = @lt_nfe_key-docnum.
+  SORT lt_nfe_auth BY docnum.
+
+  LOOP AT git_item INTO gwa_item.
+    DATA(lv_tabix) = sy-tabix.
+    DATA(lv_nfe_docnum) = COND j_1bnfdoc-docnum( WHEN gwa_item-docnum_orig IS NOT INITIAL
+                                                  THEN gwa_item-docnum_orig
+                                                  ELSE gwa_item-docnum ).
+    READ TABLE lt_nfe_auth INTO DATA(ls_nfe_auth) BINARY SEARCH
+      WITH KEY docnum = lv_nfe_docnum.
+    IF sy-subrc = 0.
+      gwa_item-nfe_authdate = ls_nfe_auth-authdate.
+      MODIFY git_item FROM gwa_item INDEX lv_tabix TRANSPORTING nfe_authdate.
+    ENDIF.
+  ENDLOOP.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
 *&      Form  CLEAR_EDOC_FILTERS
 *&---------------------------------------------------------------------*
 * S_DATUM (eDocument date) and S_ACCKEY (eDocument access key) only
@@ -1376,6 +1423,7 @@ FORM build_celltab.
           'ICMS_RATE'    TO lt_fieldnames,
           'SERIES'       TO lt_fieldnames,
           'DOCDAT'       TO lt_fieldnames,
+          'NFE_AUTHDATE' TO lt_fieldnames,
           'ICMS_VAL'     TO lt_fieldnames,
           'LAND1'        TO lt_fieldnames,
           'REGIO_ORIG'   TO lt_fieldnames,
@@ -2528,6 +2576,8 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
     ENDLOOP.
   ENDIF.
 
+  PERFORM fill_nfe_authdate.
+
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -2593,6 +2643,13 @@ FORM build_fieldcat USING pu_mode TYPE c.
   " grouping key - see BUILD_SORT_TABLE/BUILD_NOTA_COLOR), then
   " DocNum, Series.
   add_field 'DOCDAT'      'NFe Date'           10.
+  " Display only - not a Y0033FI_ICM_ITEM field, see FILL_NFE_AUTHDATE.
+  CLEAR ls_fcat.
+  ls_fcat-fieldname = 'NFE_AUTHDATE'.
+  ls_fcat-coltext   = 'NF-e Authorized on'.
+  ls_fcat-outputlen = 10.
+  ls_fcat-datatype  = 'DATS'.
+  APPEND ls_fcat TO gt_fcat.
   add_field 'NFENUM'      'NFe Number'         12.
   add_field 'SEQNR'       'Cycle'               6.
   add_field 'ITMNUM'      'Item'                6.

@@ -56,6 +56,7 @@ START-OF-SELECTION.
     PERFORM filter_active_cycle.
     PERFORM calculate_credit.
     PERFORM flag_not_candidates.
+    PERFORM fill_nfe_authdate.  " display only - NF-e authorization date column
     PERFORM get_status_filter_search USING p_sre p_snc p_ser CHANGING gr_status_filt.
     PERFORM apply_status_filter USING gr_status_filt.
   ELSE.

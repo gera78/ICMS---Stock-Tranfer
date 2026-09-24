@@ -218,6 +218,7 @@ TYPES:
     werks_dest   TYPE werks_d,           " from EDOBRINCOMING-PLANT
     edoc_guid    TYPE char32,            " eDocument GUID used as source for this cycle (fixed evidence)
     edoc_create_date TYPE dats,          " display only, never persisted - EDOCUMENT-CREATE_DATE of EDOC_GUID as shown on the grid
+    nfe_authdate TYPE dats,              " display only, never persisted - SEFAZ authorization date (J_1BNFE_ACTIVE-AUTHDATE) of the origin NF-e, see FILL_NFE_AUTHDATE
     materialdoc  TYPE char10,            " informative only, not used for matching
     materialdoc_year TYPE n LENGTH 4,    " informative only, not used for matching
     matnr        TYPE j_1bnflin-matnr,
