@@ -2640,6 +2640,47 @@ FORM refresh_from_db USING pu_bukrs TYPE bukrs.
     ENDLOOP.
   ENDIF.
 
+  " S_AUTDAT = SEFAZ authorization date of the ORIGIN NF-e - same date
+  " as in search mode and in the NFE_AUTHDATE column. The origin nota is
+  " the item's own DOCNUM (stock-transfer item) or its DOCNUM_REF
+  " (eDocument item) - whichever of the two is an outgoing NF-e
+  " (J_1BNFE_ACTIVE-DIRECT = 2) authorized in the range.
+  IF s_autdat[] IS NOT INITIAL AND lt_db IS NOT INITIAL.
+    TYPES: BEGIN OF ty_aut_key,
+             docnum TYPE j_1bnfdoc-docnum,
+           END OF ty_aut_key.
+    DATA lt_aut_key TYPE STANDARD TABLE OF ty_aut_key WITH DEFAULT KEY.
+    LOOP AT lt_db INTO DATA(ls_db_aut).
+      APPEND VALUE #( docnum = ls_db_aut-docnum ) TO lt_aut_key.
+      IF ls_db_aut-docnum_ref IS NOT INITIAL.
+        APPEND VALUE #( docnum = ls_db_aut-docnum_ref ) TO lt_aut_key.
+      ENDIF.
+    ENDLOOP.
+    SORT lt_aut_key BY docnum.
+    DELETE ADJACENT DUPLICATES FROM lt_aut_key COMPARING docnum.
+
+    DATA lt_aut_in_range TYPE STANDARD TABLE OF j_1bnfdoc-docnum WITH DEFAULT KEY.
+    SELECT docnum FROM j_1bnfe_active
+      INTO TABLE @lt_aut_in_range
+      FOR ALL ENTRIES IN @lt_aut_key
+      WHERE docnum   = @lt_aut_key-docnum
+        AND direct   = '2'
+        AND authdate IN @s_autdat.
+    SORT lt_aut_in_range BY table_line.
+
+    LOOP AT lt_db INTO ls_db_aut.
+      READ TABLE lt_aut_in_range TRANSPORTING NO FIELDS BINARY SEARCH
+        WITH KEY table_line = ls_db_aut-docnum.
+      IF sy-subrc <> 0 AND ls_db_aut-docnum_ref IS NOT INITIAL.
+        READ TABLE lt_aut_in_range TRANSPORTING NO FIELDS BINARY SEARCH
+          WITH KEY table_line = ls_db_aut-docnum_ref.
+      ENDIF.
+      IF sy-subrc <> 0.
+        DELETE lt_db.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
   CLEAR git_item.
   LOOP AT lt_db INTO DATA(ls_db).
     CLEAR gwa_item.
