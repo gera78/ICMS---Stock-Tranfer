@@ -38,7 +38,11 @@ SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
     s_series FOR j_1bnfdoc-series,                " NFe series
     s_docdat FOR j_1bnfdoc-docdat,                " nota fiscal date - every mode (search: J_1BNFDOC-DOCDAT, view: ITEM-DOCDAT, see REFRESH_FROM_DB)
     s_autdat FOR sy-datum MODIF ID fs,            " NF-e authorization date (J_1BNFE_ACTIVE-AUTHDATE) - transfer model, search only
-    s_acckey FOR y0033fi_icm_edoc-accesskey MODIF ID ed, " eDocument model only (MODIF ID ED) - NF-e access key (44 digits) - typed against Y0033FI_ICM_EDOC-ACCESSKEY (CHAR44), not the source table directly: EDOBRINCOMING-ACCESSKEY is TYPE STRING, which selection-screen fields can't use
+* S_ACCKEY: NF-e access key (44 digits), eDocument model only (MODIF ID
+* ED). Typed against Y0033FI_ICM_EDOC-ACCESSKEY (CHAR44), not the source
+* table: EDOBRINCOMING-ACCESSKEY is TYPE STRING, not allowed on a
+* selection screen.
+    s_acckey FOR y0033fi_icm_edoc-accesskey MODIF ID ed,
 * S_LCTO only applies in view mode - nothing is posted yet in search
 * mode, so it is hidden there (same MODIF ID FV as the status filter).
     s_lcto   FOR sy-datum MODIF ID fv,
