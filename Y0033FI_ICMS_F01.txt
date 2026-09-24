@@ -346,8 +346,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
     WHERE edoc_type   = @gv_edoc_type
       AND proc_status IN ( @gc_edoc_proc_status-completed_ok,
                             @gc_edoc_proc_status-completed_man )
-      AND ( create_date IN @s_datum OR change_date IN @s_datum )
-      AND edoc_guid IN @gr_edoc_guid.  " API only (single DOCNUM) - always empty in the report programs
+      AND ( create_date IN @s_datum OR change_date IN @s_datum ).
   " S_DATUM matches CREATE_DATE OR CHANGE_DATE: an eDocument is often
   " created on one day and only reaches COMP_OK/COMP_MAN (the status
   " this SELECT requires) on a later day - a daily job running with
@@ -565,11 +564,7 @@ FORM select_candidate_documents USING pu_bukrs TYPE bukrs.
   " row themselves (a synchronous round trip per row, waiting for the
   " database to confirm each one), by far the single biggest cost in a
   " search with any real number of eDocuments.
-  " API mode (GV_API_MODE): no COMMIT here - the caller owns the LUW;
-  " these tracking rows are committed with the caller's own COMMIT.
-  IF gv_api_mode = abap_false.
-    COMMIT WORK AND WAIT.
-  ENDIF.
+  COMMIT WORK AND WAIT.
 
 ENDFORM.
 
